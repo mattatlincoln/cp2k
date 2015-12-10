@@ -71,7 +71,8 @@ MODULE qs_environment_methods
   USE qs_outer_scf,                    ONLY: outer_loop_variables_count
   USE qs_rho0_types,                   ONLY: rho0_mpole_type
   USE qs_rho_methods,                  ONLY: qs_rho_rebuild
-  USE qs_rho_types,                    ONLY: qs_rho_type
+  USE qs_rho_types,                    ONLY: qs_rho_create,&
+                                             qs_rho_type
   USE qs_scf_types,                    ONLY: scf_env_did_change
   USE scf_control_types,               ONLY: scf_control_type
   USE task_list_methods,               ONLY: generate_qs_task_list
@@ -134,6 +135,7 @@ SUBROUTINE qs_env_setup(qs_env,unit_nr)
       POINTER                                :: qs_kind_set
     TYPE(qs_ks_env_type), POINTER            :: ks_env
     TYPE(scf_control_type), POINTER          :: scf_control
+    TYPE(qs_rho_type), POINTER               :: rho_external
 
     CALL timeset(routineN,handle)
 
@@ -191,6 +193,13 @@ SUBROUTINE qs_env_setup(qs_env,unit_nr)
       CALL mpools_rebuild_fm_pools(qs_env%mpools_aux_fit,mos=qs_env%mos_aux_fit,&
            blacs_env=blacs_env, para_env=para_env)
      END IF
+
+    ! allocate storage for ZMP external density
+    IF (dft_control%apply_external_density) THEN
+       NULLIFY(rho_external)
+       CALL qs_rho_create(rho_external)
+       CALL set_qs_env(qs_env, rho_external=rho_external)
+    ENDIF
 
     ! create 2d distribution
 
