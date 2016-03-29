@@ -117,7 +117,7 @@ CONTAINS
 
     ALLOCATE(kpp1_env)
     NULLIFY(kpp1_env%v_rspace, kpp1_env%v_ao, kpp1_env%drho_r,&
-         kpp1_env%rho_set, &
+         kpp1_env%rho_set, kpp1_env%v_hfx, &
          kpp1_env%deriv_set, kpp1_env%spin_pot, kpp1_env%grad_pot,&
          kpp1_env%ndiag_term)
     kpp1_env%ref_count=1
@@ -346,6 +346,7 @@ CONTAINS
 
     DO ispin=1,nspins
        CALL cp_dbcsr_set(kpp1_env%v_ao(ispin)%matrix,0.0_dp)
+       CALL cp_dbcsr_set(kpp1_env%v_hfx(ispin)%matrix,0.0_dp)
     END DO
     CALL tddft_hfx_matrix(qs_env,rho, kpp1_env)
 
@@ -466,6 +467,8 @@ CONTAINS
        END IF
 
        CALL cp_dbcsr_copy(k_p_p1(ispin)%matrix,kpp1_env%v_ao(ispin)%matrix)
+       CALL cp_dbcsr_add(k_p_p1(ispin)%matrix,kpp1_env%v_hfx(ispin)%matrix,&
+            alpha_scalar=1.0_dp,beta_scalar=1.0_dp)
     END DO
 
     IF (gapw) THEN
@@ -658,6 +661,16 @@ CONTAINS
           END DO
     END IF
 
+    IF (.NOT.ASSOCIATED(kpp1_env%v_hfx)) THEN
+       CALL cp_dbcsr_allocate_matrix_set(kpp1_env%v_hfx,nspins)
+          DO ispin=1,nspins
+             ALLOCATE(kpp1_env%v_hfx(ispin)%matrix)
+             CALL cp_dbcsr_init(kpp1_env%v_hfx(ispin)%matrix)
+             CALL cp_dbcsr_copy(kpp1_env%v_hfx(ispin)%matrix,matrix_s(1)%matrix,&
+                  name="kpp1%v_hfx-"//ADJUSTL(cp_to_string(ispin)))
+          END DO
+    END IF
+
     IF (.not.ASSOCIATED(kpp1_env%deriv_set)) THEN
 
        CALL section_vals_val_get(input,"DFT%EXCITATIONS",&
@@ -741,6 +754,11 @@ CONTAINS
     IF (my_s_struct_changed) THEN
        IF (ASSOCIATED(kpp1_env%v_ao)) THEN
           CALL cp_dbcsr_deallocate_matrix_set(kpp1_env%v_ao)
+       END IF
+    END IF
+    IF (my_s_struct_changed) THEN
+       IF (ASSOCIATED(kpp1_env%v_hfx)) THEN
+          CALL cp_dbcsr_deallocate_matrix_set(kpp1_env%v_hfx)
        END IF
     END IF
     IF (my_s_struct_changed.or.my_psi0_changed) THEN

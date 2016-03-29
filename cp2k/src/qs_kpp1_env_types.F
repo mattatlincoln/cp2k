@@ -57,6 +57,7 @@ MODULE qs_kpp1_env_types
      INTEGER :: ref_count, id_nr, print_count, iter
      TYPE(pw_p_type), DIMENSION(:), POINTER :: v_rspace
      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER :: v_ao
+     TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER :: v_hfx
      TYPE(pw_p_type), DIMENSION(:,:), POINTER :: drho_r
      TYPE(xc_derivative_set_type), POINTER :: deriv_set
      TYPE(xc_rho_set_type), POINTER        :: rho_set
@@ -110,6 +111,14 @@ CONTAINS
                 END IF
              END DO
              DEALLOCATE(kpp1_env%v_ao)
+          END IF
+          IF (ASSOCIATED(kpp1_env%v_hfx)) THEN
+             DO ispin=1,SIZE(kpp1_env%v_hfx)
+                IF (ASSOCIATED(kpp1_env%v_hfx(ispin)%matrix)) THEN
+                   CALL cp_dbcsr_deallocate_matrix(kpp1_env%v_hfx(ispin)%matrix)
+                END IF
+             END DO
+             DEALLOCATE(kpp1_env%v_hfx)
           END IF
           IF (ASSOCIATED(kpp1_env%drho_r)) THEN
              DEALLOCATE(kpp1_env%drho_r)

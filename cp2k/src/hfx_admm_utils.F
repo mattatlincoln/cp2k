@@ -1038,7 +1038,7 @@ CONTAINS
 
     !write(6,*) SIZE(kpp1_env%v_ao)
     DO ispin = 1,mspin
-       CALL cp_dbcsr_copy(matrix_ks_orb(ispin,1)%matrix,kpp1_env%v_ao(ispin)%matrix)    
+       CALL cp_dbcsr_copy(kpp1_env%v_hfx(ispin)%matrix, matrix_ks_orb(ispin,1)%matrix)    
     END DO
 
     CALL timestop(handle)
