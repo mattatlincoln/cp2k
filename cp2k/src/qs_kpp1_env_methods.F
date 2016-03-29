@@ -26,6 +26,7 @@ MODULE qs_kpp1_env_methods
                                              cp_print_key_should_output,&
                                              cp_print_key_unit_nr
   USE hartree_local_methods,           ONLY: Vh_1c_gg_integrals
+  USE hfx_admm_utils,                  ONLY: tddft_hfx_matrix
   USE input_constants,                 ONLY: do_method_gapw,&
                                              do_method_gapw_xc,&
                                              tddfpt_excitations,&
@@ -343,6 +344,11 @@ CONTAINS
        IF (res_etype == tddfpt_triplet) fac=-1.0_dp
     END IF
 
+    DO ispin=1,nspins
+       CALL cp_dbcsr_set(kpp1_env%v_ao(ispin)%matrix,0.0_dp)
+    END DO
+    CALL tddft_hfx_matrix(qs_env,rho, kpp1_env)
+
     CALL  xc_calc_2nd_deriv(v_xc, kpp1_env%deriv_set, kpp1_env%rho_set, &
          rho1_set, auxbas_pw_pool,xc_section=xc_section,&
          tddfpt_fac=fac)
@@ -381,7 +387,6 @@ CONTAINS
 
              END IF
              ! remove kpp1_env%v_ao and work directly on k_p_p1 ?
-             CALL cp_dbcsr_set(kpp1_env%v_ao(ispin)%matrix,0.0_dp)
              CALL integrate_v_rspace(v_rspace=v_rspace_new(ispin),&
                   pmat=rho_ao(ispin),&
                   hmat=kpp1_env%v_ao(ispin),&

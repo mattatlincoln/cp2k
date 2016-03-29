@@ -162,7 +162,7 @@ CONTAINS
                                                 nder, nders, nimages, nkind
     INTEGER, DIMENSION(:, :, :), POINTER     :: cell_to_index
     LOGICAL :: all_potential_present, gth_potential_present, kgpot, lrigpw, &
-      ofdft, ppl_present, use_virial
+      ofdft, ppl_present, use_virial, LRTDDFPT
     REAL(KIND=dp)                            :: eps_filter, eps_fit, eps_ppnl
     TYPE(atomic_kind_type), DIMENSION(:), &
       POINTER                                :: atomic_kind_set
@@ -285,6 +285,19 @@ CONTAINS
        ENDIF
     ENDIF
 
+    IF (ASSOCIATED(dft_control%rtp_control)) THEN
+       IF (dft_control%rtp_control%apply_delta_pulse .AND. &
+           dft_control%rtp_control%periodic) THEN
+           nders = 1
+       ENDIF
+    ENDIF
+
+    LRTDDFPT = .TRUE.
+    IF(LRTDDFPT) THEN
+       nders = 1
+    END IF
+    
+
     ! filter for new matrices
     eps_filter = dft_control%qs_control%eps_filter_matrix
 
@@ -296,6 +309,7 @@ CONTAINS
     CALL get_qs_env(qs_env=qs_env, sab_orb=sab_orb)
     IF (calculate_forces) THEN
        ! S matrix
+       nders = 1 
        CALL build_overlap_matrix(ks_env,nderivative=nders,matrixkp_s=matrix_s,&
                                  matrix_name="OVERLAP MATRIX",&
                                  basis_type_a="ORB",&

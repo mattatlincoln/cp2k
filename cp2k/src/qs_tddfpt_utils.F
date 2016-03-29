@@ -19,15 +19,23 @@ MODULE qs_tddfpt_utils
   USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose,&
                                              cp_fm_cholesky_invert
   USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                             cp_fm_get_element,&
                                              cp_fm_get_submatrix,&
+                                             cp_fm_get_info,&
                                              cp_fm_init_random,&
                                              cp_fm_p_type,&
                                              cp_fm_release,&
                                              cp_fm_set_all,&
                                              cp_fm_set_submatrix,&
-                                             cp_fm_to_fm
+                                             cp_fm_to_fm,&
+                                             cp_fm_type
+  USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                             cp_fm_struct_release,&
+                                             cp_fm_struct_type
+  USE cp_gemm_interface,               ONLY: cp_gemm
   USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
   USE kinds,                           ONLY: dp
+  USE message_passing,                 ONLY: mp_sum
   USE physcon,                         ONLY: evolt
   USE qs_environment_types,            ONLY: get_qs_env,&
                                              qs_environment_type
@@ -294,20 +302,24 @@ CONTAINS
       routineP = moduleN//':'//routineN
 
     INTEGER                                  :: i, j, n_ev, n_spins, occ, &
-                                                output_unit, spin, virt
+                                                output_unit, spin, virt, n_lumos, nmo,& 
+                                                nao, component
     INTEGER, DIMENSION(2)                    :: nhomos, nlumos, nrows
     REAL(KIND=dp)                            :: contribution, &
-                                                summed_contributions
+                                                summed_contributions, xint, yint, zint,&
+                                                osx,osy,osz
     REAL(KIND=dp), ALLOCATABLE, &
       DIMENSION(:, :)                        :: homo_coeff_col, lumo_coeff_col
     TYPE(cp_dbcsr_p_type), DIMENSION(:), &
       POINTER                                :: matrix_s
     TYPE(cp_fm_p_type), DIMENSION(:), &
-      POINTER                                :: S_lumos
+      POINTER                                :: S_lumos,  matrix_elements
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(tddfpt_control_type)                :: t_control
+    TYPE(cp_fm_struct_type), POINTER         :: me_struct, template
+    TYPE(cp_fm_type), POINTER                :: mo_coeff, buf, test
 
-    NULLIFY(S_lumos, matrix_s, dft_control)
+    NULLIFY(S_lumos, matrix_s, dft_control, mo_coeff, buf, me_struct, matrix_elements, test)
     output_unit= cp_logger_get_default_io_unit()
     CALL get_qs_env(qs_env, matrix_s=matrix_s, dft_control=dft_control)
 
@@ -317,6 +329,43 @@ CONTAINS
     t_control = dft_control%tddfpt_control
     n_ev      = t_control%n_ev
     n_spins   = dft_control%nspins
+
+    ALLOCATE(matrix_elements(3*n_spins))
+
+    DO spin=1, n_spins
+
+       CALL get_mo_set(qs_env%mos(spin)%mo_set, nao=nao, nmo=nmo, mo_coeff=mo_coeff)
+       n_lumos = t_control%lumos(spin)%matrix%matrix_struct%ncol_global
+
+       IF (output_unit>0) THEN
+          WRITE (output_unit,*) "Calculating momentum operator matrix elements for spin", spin
+          WRITE (output_unit,*) "Found", nmo,"occupied and ", n_lumos,"unoccupied orbitals"
+       END IF
+
+       template => t_control%lumos(spin)%matrix%matrix_struct
+       CALL cp_fm_create(buf,template,"buffer")
+       CALL cp_fm_struct_create(me_struct,para_env=template%para_env,context=template%context, &
+         nrow_global=nmo,ncol_global=n_lumos)
+
+       DO component=1,3
+          CALL cp_fm_create(matrix_elements(component+(spin-1)*3)%matrix,me_struct,"matrix_elements")
+       END DO
+
+       DO component=1,3
+          IF (output_unit>0) THEN
+             WRITE (output_unit,*) "Calculating momentum operator matrix elements for spin", spin, &
+               "component", component
+          END IF
+          CALL cp_dbcsr_sm_fm_multiply(matrix_s(component+1)%matrix, t_control%lumos(spin)%matrix ,buf,n_lumos)
+          CALL cp_gemm("T","N",nmo,n_lumos,nao,1.0_dp,mo_coeff,buf,0.0_dp,matrix_elements(component+(spin-1)*3)%matrix)
+       END DO
+
+       CALL cp_fm_struct_release(me_struct)
+       CALL cp_fm_release(buf)
+       NULLIFY(mo_coeff)
+
+    END DO
+
 
     ALLOCATE(S_lumos(n_spins))
 
@@ -338,6 +387,9 @@ CONTAINS
           WRITE (output_unit,*)
        END IF
        summed_contributions = 0.0_dp
+       osx = 0.0
+       osy = 0.0
+       osz = 0.0
        DO spin=1, n_spins
           IF (n_spins == 2) THEN
              IF (spin == 1) THEN
@@ -345,6 +397,7 @@ CONTAINS
              ELSE
                 IF (output_unit>0) WRITE (output_unit,*) 'beta:'
              END IF
+             template => t_control%lumos(spin)%matrix%matrix_struct
           END IF
           searchloop: DO occ=nhomos(spin), 1, -1
              CALL cp_fm_get_submatrix(t_env%evecs(i,spin)%matrix, homo_coeff_col, &
@@ -357,13 +410,28 @@ CONTAINS
                    contribution = contribution + homo_coeff_col(j,1)*lumo_coeff_col(j,1)
                 END DO
                 summed_contributions = summed_contributions + (contribution)**2
+                CALL cp_fm_get_element(matrix_elements(1+(spin-1)*3)%matrix,occ,virt, xint)
+                CALL cp_fm_get_element(matrix_elements(2+(spin-1)*3)%matrix,occ,virt, yint)
+                CALL cp_fm_get_element(matrix_elements(3+(spin-1)*3)%matrix,occ,virt, zint)
+                osx = osx + ((xint)**2)*(contribution)**2 
+                osy = osy + ((yint)**2)*(contribution)**2 
+                osz = osz + ((zint)**2)*(contribution)**2 
                 IF (ABS(contribution) > 5.0e-2_dp) THEN
-                   IF (output_unit>0) WRITE (output_unit,'(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
+                   IF (output_unit>0) THEN
+                      WRITE (output_unit,'(14X,I5,A,I5,10X,F8.3,5X,F8.3)') &
                         occ, " ->", nhomos(spin)+virt, ABS(contribution), summed_contributions
+
+                      WRITE (output_unit,'(14X,A,5X,F8.3,5X,F8.3,5X,F8.3)') &
+                           "oscillator strength", xint**2, yint**2, zint**2
+                   END IF
                 END IF
-                IF (ABS(summed_contributions - 1.0_dp) < 1.0e-3_dp) CYCLE searchloop
+                IF (ABS(summed_contributions - 1.0_dp) < 1.0e-3_dp) THEN 
+                   CYCLE searchloop
+                END IF
              END DO
           END DO searchloop
+          WRITE (output_unit,'(14X,A,5X,F8.3,5X,F8.3,5X,F8.3)') &
+             "total oscillator strength", osx, osy,osz
        END DO
        IF (output_unit>0) WRITE (output_unit,*)
     END DO

@@ -21,6 +21,7 @@ MODULE hfx_admm_utils
   USE cell_types,                      ONLY: cell_type
   USE cp_control_types,                ONLY: dft_control_type
   USE cp_dbcsr_interface,              ONLY: cp_dbcsr_add,&
+                                             cp_dbcsr_copy,&
                                              cp_dbcsr_p_type,&
                                              cp_dbcsr_set,&
                                              cp_dbcsr_type
@@ -72,6 +73,7 @@ MODULE hfx_admm_utils
                                              set_qs_env
   USE qs_force_types,                  ONLY: qs_force_type
   USE qs_kind_types,                   ONLY: qs_kind_type
+  USE qs_kpp1_env_types,               ONLY: qs_kpp1_env_type
   USE qs_ks_types,                     ONLY: qs_ks_env_type,&
                                              set_ks_env
   USE qs_mo_types,                     ONLY: get_mo_set,&
@@ -88,7 +90,7 @@ MODULE hfx_admm_utils
   PRIVATE
 
   ! *** Public subroutines ***
-  PUBLIC :: hfx_ks_matrix, hfx_admm_init, create_admm_xc_section
+  PUBLIC :: hfx_ks_matrix, hfx_admm_init, create_admm_xc_section, tddft_hfx_matrix
 
   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'hfx_admm_utils'
 
@@ -952,5 +954,95 @@ CONTAINS
     END IF
 
   END SUBROUTINE create_admm_xc_section
+
+! *****************************************************************************
+!> \brief Add the hfx contributions to the Hamiltonian
+!>
+!> \param qs_env ...
+!> \param matrix_ks ...
+!> \param rho ...
+!> \param energy ...
+!> \param calculate_forces ...
+!> \param just_energy ...
+!> \param v_rspace_new ...
+!> \param v_tau_rspace ...
+!> \par History
+!>     refactoring 03-2011 [MI]
+! *****************************************************************************
+
+  SUBROUTINE tddft_hfx_matrix(qs_env,rho,kpp1_env)
+
+    TYPE(qs_environment_type), POINTER       :: qs_env
+    TYPE(qs_rho_type), POINTER               :: rho
+    TYPE(qs_kpp1_env_type), POINTER          :: kpp1_env
+    TYPE(qs_energy_type), POINTER            :: energy
+    CHARACTER(LEN=*), PARAMETER :: routineN = 'tddft_hfx_matrix', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: handle,  irep, &
+                                                ispin, mspin, n_rep_hf, &
+                                                nimages, nspins
+    LOGICAL :: distribute_fock_matrix,&
+      hfx_treat_lsd_in_core, s_mstruct_changed
+    TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
+      POINTER                                :: matrix_h, matrix_ks_orb, &
+                                                rho_ao_orb
+    TYPE(cp_para_env_type), POINTER          :: para_env
+    TYPE(dft_control_type), POINTER          :: dft_control
+    TYPE(pw_env_type), POINTER               :: pw_env
+    TYPE(pw_poisson_type), POINTER           :: poisson_env
+    TYPE(qs_rho_type), POINTER               :: rho_orb
+    TYPE(section_vals_type), POINTER         :: hfx_sections, input
+
+    CALL timeset(routineN, handle)
+
+    NULLIFY(dft_control, hfx_sections, input, &
+            para_env, poisson_env, pw_env, &
+            matrix_ks_orb, rho_ao_orb,&
+            matrix_h)
+
+    CALL get_qs_env(qs_env=qs_env,&
+         dft_control=dft_control,&
+         energy=energy,&
+         input=input,&
+         matrix_h_kp=matrix_h,&
+         para_env=para_env,&
+         pw_env=pw_env,&
+         s_mstruct_changed=s_mstruct_changed)
+
+    nspins=dft_control%nspins
+    nimages=dft_control%nimages
+
+    hfx_sections => section_vals_get_subs_vals(input,"DFT%XC%HF")
+    CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
+    CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core,&
+                                i_rep_section=1)
+ 
+    CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
+
+    DO irep = 1,n_rep_hf
+
+       mspin=1
+       IF ( hfx_treat_lsd_in_core ) mspin=nspins
+       
+       CALL get_qs_env(qs_env=qs_env,matrix_ks_kp=matrix_ks_orb,rho=rho_orb)
+       CALL qs_rho_get(rho_struct=rho_orb,rho_ao_kp=rho_ao_orb)
+       CALL qs_rho_get(rho_struct=rho,rho_ao_kp=rho_ao_orb)
+       ! Finally the real hfx calulation
+       DO ispin = 1,mspin
+          CALL integrate_four_center(qs_env,matrix_ks_orb,energy,rho_ao_orb,hfx_sections,&
+                                     para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
+                                     ispin=ispin)
+      END DO
+    END DO
+
+    !write(6,*) SIZE(kpp1_env%v_ao)
+    DO ispin = 1,mspin
+       CALL cp_dbcsr_copy(matrix_ks_orb(ispin,1)%matrix,kpp1_env%v_ao(ispin)%matrix)    
+    END DO
+
+    CALL timestop(handle)
+
+  END SUBROUTINE  tddft_hfx_matrix
 
 END MODULE hfx_admm_utils
