@@ -16,6 +16,7 @@ MODULE qs_kpp1_env_methods
                                              cp_dbcsr_copy,&
                                              cp_dbcsr_deallocate_matrix_set,&
                                              cp_dbcsr_init,&
+                                             cp_dbcsr_print,&
                                              cp_dbcsr_p_type,&
                                              cp_dbcsr_scale,&
                                              cp_dbcsr_set
@@ -25,6 +26,7 @@ MODULE qs_kpp1_env_methods
   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                              cp_print_key_should_output,&
                                              cp_print_key_unit_nr
+  USE cp_realspace_grid_cube,          ONLY: cp_pw_to_cube
   USE hartree_local_methods,           ONLY: Vh_1c_gg_integrals
   USE hfx_admm_utils,                  ONLY: tddft_hfx_matrix
   USE input_constants,                 ONLY: do_method_gapw,&
@@ -39,7 +41,11 @@ MODULE qs_kpp1_env_methods
                                              section_vals_type,&
                                              section_vals_val_get
   USE kahan_sum,                       ONLY: accurate_sum
-  USE kinds,                           ONLY: dp
+  USE kinds,                           ONLY: dp,&
+                                             default_path_length
+
+  USE particle_list_types,             ONLY: particle_list_type
+  USE particle_types,                  ONLY: particle_type
   USE pw_env_types,                    ONLY: pw_env_get,&
                                              pw_env_type
   USE pw_methods,                      ONLY: pw_axpy,&
@@ -75,6 +81,8 @@ MODULE qs_kpp1_env_methods
   USE qs_rho0_ggrid,                   ONLY: integrate_vhg0_rspace
   USE qs_rho_types,                    ONLY: qs_rho_get,&
                                              qs_rho_type
+  USE qs_subsys_types,                 ONLY: qs_subsys_get,&
+                                             qs_subsys_type
   USE qs_vxc_atom,                     ONLY: calculate_xc_2nd_deriv_atom
   USE xc,                              ONLY: xc_calc_2nd_deriv,&
                                              xc_prep_2nd_deriv
@@ -264,7 +272,7 @@ CONTAINS
          /=0) THEN
        output_unit = cp_print_key_unit_nr(logger,scf_section,"PRINT%TOTAL_DENSITIES",&
             extension=".scfLog")
-       CALL print_densities(rho1, rho1_tot_gspace, output_unit)
+       CALL print_densities(rho1, rho1_tot_gspace, qs_env, output_unit)
        CALL cp_print_key_finished_output(output_unit,logger,scf_section,&
             "PRINT%TOTAL_DENSITIES")
     END IF
@@ -348,7 +356,7 @@ CONTAINS
        CALL cp_dbcsr_set(kpp1_env%v_ao(ispin)%matrix,0.0_dp)
        CALL cp_dbcsr_set(kpp1_env%v_hfx(ispin)%matrix,0.0_dp)
     END DO
-    CALL tddft_hfx_matrix(qs_env,rho, kpp1_env)
+    CALL tddft_hfx_matrix(qs_env,rho1, kpp1_env)
 
     CALL  xc_calc_2nd_deriv(v_xc, kpp1_env%deriv_set, kpp1_env%rho_set, &
          rho1_set, auxbas_pw_pool,xc_section=xc_section,&
@@ -467,8 +475,11 @@ CONTAINS
        END IF
 
        CALL cp_dbcsr_copy(k_p_p1(ispin)%matrix,kpp1_env%v_ao(ispin)%matrix)
+       !CALL cp_dbcsr_print(kpp1_env%v_hfx(ispin)%matrix)
+       !CALL cp_dbcsr_print(k_p_p1(ispin)%matrix)
        CALL cp_dbcsr_add(k_p_p1(ispin)%matrix,kpp1_env%v_hfx(ispin)%matrix,&
             alpha_scalar=1.0_dp,beta_scalar=1.0_dp)
+       !CALL cp_dbcsr_print(k_p_p1(ispin)%matrix)
     END DO
 
     IF (gapw) THEN
@@ -798,10 +809,11 @@ CONTAINS
 !> \param rho1_tot_gspace ...
 !> \param output_unit ...
 ! *****************************************************************************
-  SUBROUTINE print_densities(rho1, rho1_tot_gspace, output_unit)
+  SUBROUTINE print_densities(rho1, rho1_tot_gspace, qs_env, output_unit)
 
     TYPE(qs_rho_type), POINTER               :: rho1
     TYPE(pw_p_type), INTENT(IN)              :: rho1_tot_gspace
+    TYPE(qs_environment_type), POINTER       :: qs_env
     INTEGER                                  :: output_unit
 
     CHARACTER(len=*), PARAMETER :: routineN = 'print_densities', &
@@ -809,8 +821,14 @@ CONTAINS
 
     REAL(KIND=dp)                            :: total_rho_gspace
     REAL(KIND=dp), DIMENSION(:), POINTER     :: tot_rho1_r
+    TYPE(particle_list_type), POINTER        :: particles
+    CHARACTER(LEN=default_path_length)       :: title
+    TYPE(qs_subsys_type), POINTER            :: subsys
+    INTEGER, DIMENSION(:), POINTER           :: stride
+    TYPE(pw_p_type), DIMENSION(:), POINTER   :: rho1_r
 
-    NULLIFY(tot_rho1_r)
+    NULLIFY(tot_rho1_r, stride)
+    ALLOCATE(stride(3))
 
     total_rho_gspace = pw_integrate_function(rho1_tot_gspace%pw,isign=-1)
     IF (output_unit>0) THEN
@@ -821,6 +839,18 @@ CONTAINS
             "KPP1 total charge density (g-space):",&
             total_rho_gspace
     END IF
+
+    CALL get_qs_env(qs_env=qs_env,&
+         subsys=subsys)
+    CALL qs_subsys_get(subsys,particles=particles)
+    
+    stride(:) =1
+
+    CALL qs_rho_get(rho1, rho_r=rho1_r)
+
+    WRITE(title,*) "Transition density"
+    CALL cp_pw_to_cube(rho1_r(1)%pw,2000,title,particles=particles,&
+         stride=stride)
 
   END SUBROUTINE print_densities
 

@@ -983,23 +983,21 @@ CONTAINS
                                                 ispin, mspin, n_rep_hf, &
                                                 nimages, nspins
     LOGICAL :: distribute_fock_matrix,&
-      hfx_treat_lsd_in_core, s_mstruct_changed
+      hfx_treat_lsd_in_core, s_mstruct_changed, do_hfx
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
-      POINTER                                :: matrix_h, matrix_ks_orb, &
+      POINTER                                :: matrix_h, &
                                                 rho_ao_orb
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(pw_env_type), POINTER               :: pw_env
     TYPE(pw_poisson_type), POINTER           :: poisson_env
-    TYPE(qs_rho_type), POINTER               :: rho_orb
     TYPE(section_vals_type), POINTER         :: hfx_sections, input
 
     CALL timeset(routineN, handle)
 
     NULLIFY(dft_control, hfx_sections, input, &
-            para_env, poisson_env, pw_env, &
-            matrix_ks_orb, rho_ao_orb,&
-            matrix_h)
+         para_env, poisson_env, pw_env, &
+         matrix_h, rho_ao_orb)
 
     CALL get_qs_env(qs_env=qs_env,&
          dft_control=dft_control,&
@@ -1010,36 +1008,45 @@ CONTAINS
          pw_env=pw_env,&
          s_mstruct_changed=s_mstruct_changed)
 
-    nspins=dft_control%nspins
-    nimages=dft_control%nimages
-
     hfx_sections => section_vals_get_subs_vals(input,"DFT%XC%HF")
-    CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
-    CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core,&
-                                i_rep_section=1)
- 
-    CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
+    CALL section_vals_get(hfx_sections,explicit=do_hfx)
+    IF(do_hfx) THEN
 
-    DO irep = 1,n_rep_hf
+       nspins=dft_control%nspins
+       nimages=dft_control%nimages
+
+       CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
+       CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core,&
+                                 i_rep_section=1)
+ 
+       CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
+
 
        mspin=1
        IF ( hfx_treat_lsd_in_core ) mspin=nspins
-       
-       CALL get_qs_env(qs_env=qs_env,matrix_ks_kp=matrix_ks_orb,rho=rho_orb)
-       CALL qs_rho_get(rho_struct=rho_orb,rho_ao_kp=rho_ao_orb)
-       CALL qs_rho_get(rho_struct=rho,rho_ao_kp=rho_ao_orb)
-       ! Finally the real hfx calulation
        DO ispin = 1,mspin
-          CALL integrate_four_center(qs_env,matrix_ks_orb,energy,rho_ao_orb,hfx_sections,&
-                                     para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
-                                     ispin=ispin)
-      END DO
-    END DO
+          CALL cp_dbcsr_set(matrix_h(ispin,1)%matrix,0.0_dp)
+       END DO
 
-    !write(6,*) SIZE(kpp1_env%v_ao)
-    DO ispin = 1,mspin
-       CALL cp_dbcsr_copy(kpp1_env%v_hfx(ispin)%matrix, matrix_ks_orb(ispin,1)%matrix)    
-    END DO
+       DO irep = 1,n_rep_hf
+       
+          CALL qs_rho_get(rho_struct=rho,rho_ao_kp=rho_ao_orb)
+          ! Finally the real hfx calulation
+          DO ispin = 1,mspin
+             energy%ex = 0.0
+             CALL integrate_four_center(qs_env,matrix_h,energy,rho_ao_orb,hfx_sections,&
+                                        para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
+                                        ispin=ispin)
+             write(6,*)"hfx transition density energy", energy%ex
+
+          END DO
+       END DO
+
+       DO ispin = 1,mspin
+          CALL cp_dbcsr_copy(kpp1_env%v_hfx(ispin)%matrix, matrix_h(ispin,1)%matrix)    
+       END DO
+
+    END IF
 
     CALL timestop(handle)
 

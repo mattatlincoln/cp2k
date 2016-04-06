@@ -766,6 +766,10 @@ CONTAINS
     CALL qs_rho_get(p_env%rho1, rho_ao=rho1_ao)
     DO ispin=1, SIZE(p1)
        ! hack to avoid crashes in ep regs
+       ! XXXXX
+       ! no it isn't it is absolutely essential!!!!
+       ! comment must mean something else, once apon a time...
+       ! XXXXX
        IF(.not.ASSOCIATED(rho1_ao(ispin)%matrix,p1(ispin)%matrix)) THEN
           CALL cp_dbcsr_copy(rho1_ao(ispin)%matrix,p1(ispin)%matrix)
        ENDIF
