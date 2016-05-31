@@ -176,7 +176,7 @@ CONTAINS
 
       IF (tddfpt_control%nstates <= 0) THEN
          CALL integer_to_string(tddfpt_control%nstates, nstates_str)
-         CALL cp_warn(__LOCATION__, "TD-DFPT calculation was requestes for "// &
+         CALL cp_warn(__LOCATION__, "TDDFPT calculation was requestes for "// &
                       TRIM(nstates_str)//" excited states: nothing to do.")
          CALL timestop(handle)
          RETURN
@@ -314,8 +314,8 @@ CONTAINS
       CALL cp_fm_create(evecs_a_fm, fm_struct)
       CALL cp_fm_struct_release(fm_struct)
 
-      ! ++ storage for half-transformed four-centre integrals ( i j || mu nu),
-      ! where i <= j are occupied MOs, qnd mu, nu are atomic basis functions
+      ! ++ storage for half-transformed four-centre integrals (i j || mu nu),
+      ! where i <= j are occupied MOs, and mu, nu are atomic basis functions
       IF (do_hfx) THEN
          CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, para_env=para_env, context=blacs_env)
 
@@ -362,18 +362,18 @@ CONTAINS
          CALL tddfpt_init_by_energy_diff(a_kv=action_matrix, evecs=evecs, evals_occ=evals_occ, &
                                          matrix_ks=matrix_ks(ispin)%matrix, matrix_s=matrix_s(1)%matrix)
 
-         ! add contributions from coulomb term
+         ! add contributions from coulomb terms
          ! alpha == 2 due to singlet state
          CALL tddfpt_apply_coulomb(a_kv=action_matrix, alpha=2.0_dp, evecs=evecs, mos_occ=mos_occ, &
                                    qs_env=qs_env, matrix_s=matrix_s(1)%matrix)
 
-         ! add contributions from TDDFT kernel
+         ! add contributions from the adiabatic TDDFT kernel
          ! alpha == 2 due to relation K_alpha,alpha == K_alpha,beta for singlet states
          CALL tddfpt_apply_kernel(a_kv=action_matrix, alpha=2.0_dp, evecs=evecs, mos_occ=mos_occ, &
                                   xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                   qs_env=qs_env, matrix_s=matrix_s(1)%matrix, xc_section=xc_section)
 
-         ! add contribution from exact exchange
+         ! add contribution from exact exchange terms
          IF (do_hfx) &
             CALL tddfpt_apply_hfx(a_kv=action_matrix, K_ij_munu=K_ij_munu, alpha=C_hf, evecs=evecs, qs_env=qs_env)
 
@@ -1395,9 +1395,9 @@ CONTAINS
 !> \param matrix_s overlap matrix
 !> \param min_amplitude the smallest excitation amplitude to print
 !> \par History
-!>    * 05.2016 adapted from  [Sergey Chulkov]
-!> \note Based on the subroutine find_contributions() which were originally created
-!>             by Thomas Chassaing on 02.2005.
+!>    * 05.2016 created [Sergey Chulkov]
+!> \note Adapted version of the subroutine find_contributions() which was originally created
+!>       by Thomas Chassaing on 02.2005.
 ! **************************************************************************************************
    SUBROUTINE tddfpt_print_summary(log_unit, nstates, evecs, evals, nmo_occ_total, mos_virt, matrix_s, min_amplitude)
       INTEGER, INTENT(in)                                :: log_unit, nstates
