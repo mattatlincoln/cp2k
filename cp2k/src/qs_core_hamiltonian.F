@@ -278,6 +278,7 @@ CONTAINS
             nders = 1
          ENDIF
       ENDIF
+IF (nders == 0) nders = 1
 
       ! filter for new matrices
       eps_filter = dft_control%qs_control%eps_filter_matrix

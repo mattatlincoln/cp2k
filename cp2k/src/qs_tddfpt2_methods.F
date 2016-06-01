@@ -25,7 +25,7 @@ MODULE qs_tddfpt2_methods
                                               cp_fm_scale_and_add,&
                                               cp_fm_symm,&
                                               cp_fm_trace,&
-                                              cp_fm_triangular_invert
+                                              cp_fm_triangular_invert, cp_fm_schur_product
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose
    USE cp_fm_diag,                      ONLY: choose_eigv_solver
    USE cp_fm_pool_types,                ONLY: cp_fm_pool_type,&
@@ -130,6 +130,7 @@ CONTAINS
 !>       t_env / p_env wherever possible (thus reducing the amount of spaghetti code).
 ! **************************************************************************************************
    SUBROUTINE tddfpt(qs_env)
+!   USE qs_mom_dump, ONLY: cp_dbcsr_write_formatted
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt', routineP = moduleN//':'//routineN
@@ -173,6 +174,8 @@ CONTAINS
       CALL get_qs_env(qs_env, blacs_env=blacs_env, dft_control=dft_control, &
                       input=input, matrix_ks=matrix_ks, matrix_s=matrix_s, mos=mos, para_env=para_env, pw_env=pw_env)
       tddfpt_control => dft_control%tddfpt2_control
+!CALL cp_dbcsr_write_formatted(matrix_s(1)%matrix, qs_env, 1010); FLUSH(1010)
+!CALL cp_dbcsr_write_formatted(matrix_s(2)%matrix, qs_env, 1011); FLUSH(1011)
 
       IF (tddfpt_control%nstates <= 0) THEN
          CALL integer_to_string(tddfpt_control%nstates, nstates_str)
@@ -471,15 +474,17 @@ CONTAINS
       END DO
       DEALLOCATE (evecs_new)
 
-      DEALLOCATE (evals_virt)
-      DEALLOCATE (evals_occ)
-      CALL cp_fm_release(mos_occ)
 
       ! print summary information
       log_unit = cp_logger_get_default_io_unit()
       CALL tddfpt_print_summary(log_unit=log_unit, nstates=nstates, evecs=evecs, evals=evals_last, &
-                                nmo_occ_total=nmo_occ_total, mos_virt=mos_virt, matrix_s=matrix_s(1)%matrix, &
-                                min_amplitude=min_excitation_amplitude)
+                                nmo_occ_total=nmo_occ_total, mos_virt=mos_virt, matrix_s=matrix_s, &
+                                min_amplitude=min_excitation_amplitude, mos_occ=mos_occ, &
+                                evals_virt=evals_virt, evals_occ=evals_occ)
+
+      DEALLOCATE (evals_virt)
+      DEALLOCATE (evals_occ)
+      CALL cp_fm_release(mos_occ)
 
       DEALLOCATE (evals_last)
 
@@ -1399,14 +1404,18 @@ CONTAINS
 !> \note Adapted version of the subroutine find_contributions() which was originally created
 !>       by Thomas Chassaing on 02.2005.
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_print_summary(log_unit, nstates, evecs, evals, nmo_occ_total, mos_virt, matrix_s, min_amplitude)
+   SUBROUTINE tddfpt_print_summary(log_unit, nstates, evecs, evals, nmo_occ_total, &
+              mos_virt, matrix_s, min_amplitude, mos_occ, evals_virt, evals_occ)
+!   USE qs_mom_dump, ONLY: cp_fm_write_formatted
       INTEGER, INTENT(in)                                :: log_unit, nstates
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evecs
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals
       INTEGER, INTENT(in)                                :: nmo_occ_total
       TYPE(cp_fm_type), POINTER                          :: mos_virt
-      TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_s
       REAL(kind=dp), INTENT(in)                          :: min_amplitude
+      TYPE(cp_fm_type), POINTER                          :: mos_occ
+      REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals_virt, evals_occ
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_print_summary', &
          routineP = moduleN//':'//routineN
@@ -1414,11 +1423,13 @@ CONTAINS
       INTEGER                                            :: handle, iexc, imo_occ, imo_virt, istate, &
                                                             nao, nmo_occ, nmo_virt, nmo_virt_occ
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: inds
+      REAL(kind=dp)                                      :: trans_dipole_x, trans_dipole_y, trans_dipole_z, oscillator_strength
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: weights_abs_1d
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: weights_2d
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
-      TYPE(cp_fm_type), POINTER                          :: S_mos_virt, weights_fm
+      TYPE(cp_fm_type), POINTER                          :: S_mos_virt, Sx_mos_occ, Sy_mos_occ, Sz_mos_occ, weights_fm, &
+                                                            scaled_wf_fm, ediff_inv_fm, ediff_weights_fm
       TYPE(cp_para_env_type), POINTER                    :: para_env
 
       EXTERNAL :: dcopy
@@ -1428,16 +1439,30 @@ CONTAINS
       NULLIFY (fm_struct, blacs_env, para_env, S_mos_virt)
       CALL cp_fm_get_info(matrix=mos_virt, nrow_global=nao, ncol_global=nmo_virt, &
                           matrix_struct=fm_struct, context=blacs_env, para_env=para_env)
-      CALL cp_fm_get_info(matrix=evecs(1)%matrix, ncol_global=nmo_occ)
 
       CALL cp_fm_create(S_mos_virt, fm_struct)
 
-      CALL cp_dbcsr_sm_fm_multiply(matrix_s, mos_virt, S_mos_virt, ncol=nmo_virt, alpha=1.0_dp, beta=0.0_dp)
+      NULLIFY (fm_struct, Sx_mos_occ, Sy_mos_occ, Sz_mos_occ)
+      CALL cp_fm_get_info(matrix=evecs(1)%matrix, ncol_global=nmo_occ, matrix_struct=fm_struct)
+      CALL cp_fm_create(Sx_mos_occ, fm_struct)
+      CALL cp_fm_create(Sy_mos_occ, fm_struct)
+      CALL cp_fm_create(Sz_mos_occ, fm_struct)
 
-      NULLIFY (fm_struct, weights_fm)
+      CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, mos_virt, S_mos_virt, ncol=nmo_virt, alpha=1.0_dp, beta=0.0_dp)
+      CALL cp_dbcsr_sm_fm_multiply(matrix_s(2)%matrix, mos_occ,  Sx_mos_occ, ncol=nmo_occ,  alpha=1.0_dp, beta=0.0_dp)
+      CALL cp_dbcsr_sm_fm_multiply(matrix_s(3)%matrix, mos_occ,  Sy_mos_occ, ncol=nmo_occ,  alpha=1.0_dp, beta=0.0_dp)
+      CALL cp_dbcsr_sm_fm_multiply(matrix_s(4)%matrix, mos_occ,  Sz_mos_occ, ncol=nmo_occ,  alpha=1.0_dp, beta=0.0_dp)
+
+      NULLIFY (fm_struct, weights_fm, ediff_inv_fm, ediff_weights_fm)
       CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_virt, ncol_global=nmo_occ, para_env=para_env, context=blacs_env)
       CALL cp_fm_create(weights_fm, fm_struct)
+      CALL cp_fm_create(ediff_inv_fm, fm_struct)
+      CALL cp_fm_create(ediff_weights_fm, fm_struct)
       CALL cp_fm_struct_release(fm_struct)
+
+      CALL cp_fm_get_info(matrix=evecs(1)%matrix, matrix_struct=fm_struct)
+      NULLIFY(scaled_wf_fm)
+      CALL cp_fm_create(scaled_wf_fm, fm_struct)
 
       nmo_virt_occ = nmo_virt*nmo_occ
 
@@ -1445,15 +1470,37 @@ CONTAINS
       ALLOCATE (weights_abs_1d(nmo_virt_occ))
       ALLOCATE (inds(nmo_virt_occ))
 
+      ! compute 1 / (Ea - Ei)
+      DO imo_occ = 1,nmo_occ
+         DO imo_virt = 1,nmo_virt
+            weights_2d(imo_virt, imo_occ) = 1.0_dp / (evals_virt(imo_virt) - evals_occ(imo_occ))
+         END DO
+      END DO
+      CALL cp_fm_set_submatrix(ediff_inv_fm, weights_2d)
+
       IF (log_unit > 0) &
          WRITE (log_unit, '(/,1X,A,/)') "TDDFT singlet states"
 
       DO istate = 1, nstates
-         IF (log_unit > 0) &
-            WRITE (log_unit, '(1X,A,1X,I8,3X,A,F14.7)') &
-            'TDDFT| State number:', istate, 'Excitation energy (eV):', evals(istate)*evolt
-
          CALL cp_gemm('T', 'N', nmo_virt, nmo_occ, nao, 1.0_dp, S_mos_virt, evecs(istate)%matrix, 0.0_dp, weights_fm)
+
+         CALL cp_fm_schur_product(weights_fm, ediff_inv_fm, ediff_weights_fm)
+         CALL cp_gemm('N', 'N', nao, nmo_occ, nmo_virt, 1.0_dp, mos_virt, ediff_weights_fm, 0.0_dp, scaled_wf_fm)
+!CALL cp_fm_write_formatted(weights_fm,   2000); FLUSH(2000)
+!CALL cp_fm_write_formatted(ediff_inv_fm, 2010); FLUSH(2010)
+!CALL cp_fm_write_formatted(ediff_weights_fm, 2020); FLUSH(2020)
+!CPABORT("brk")
+         CALL cp_fm_trace(Sx_mos_occ, scaled_wf_fm, trans_dipole_x)
+         CALL cp_fm_trace(Sy_mos_occ, scaled_wf_fm, trans_dipole_y)
+         CALL cp_fm_trace(Sz_mos_occ, scaled_wf_fm, trans_dipole_z)
+         oscillator_strength = 2.0_dp / 3.0_dp * evals(istate) * &
+            (trans_dipole_x * trans_dipole_x + trans_dipole_y * trans_dipole_y + trans_dipole_z * trans_dipole_z)
+
+         IF (log_unit > 0) &
+            WRITE (log_unit, '(1X,A,1X,I8,3X,A,F14.7,3X,A,F10.5)') &
+            'TDDFT| State number:', istate, 'Excitation energy (eV):', evals(istate)*evolt, &
+            'Oscillator strength:', oscillator_strength
+
 
          CALL cp_fm_get_submatrix(weights_fm, weights_2d)
          CALL dcopy(nmo_virt_occ, weights_2d, 1, weights_abs_1d, 1)
@@ -1470,7 +1517,7 @@ CONTAINS
             imo_virt = MOD(inds(iexc)-1, nmo_virt)+1
 
             IF (log_unit > 0) &
-               WRITE (log_unit, '(11X,I8,T25,I8,T50,F7.3)') nmo_occ_total-nmo_occ+imo_occ, &
+               WRITE (log_unit, '(11X,I8,T25,I8,T50,F7.3,T70,F7.3)') nmo_occ_total-nmo_occ+imo_occ, &
                nmo_occ_total+imo_virt, weights_2d(imo_virt, imo_occ)
          END DO
 
@@ -1482,7 +1529,13 @@ CONTAINS
       DEALLOCATE (weights_abs_1d)
       DEALLOCATE (weights_2d)
 
+      CALL cp_fm_release(scaled_wf_fm)
+      CALL cp_fm_release(ediff_weights_fm)
+      CALL cp_fm_release(ediff_inv_fm)
       CALL cp_fm_release(weights_fm)
+      CALL cp_fm_release(Sz_mos_occ)
+      CALL cp_fm_release(Sy_mos_occ)
+      CALL cp_fm_release(Sx_mos_occ)
       CALL cp_fm_release(S_mos_virt)
 
       CALL timestop(handle)
