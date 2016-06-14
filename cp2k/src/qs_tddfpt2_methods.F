@@ -309,6 +309,7 @@ CONTAINS
          NULLIFY (Ab_vecs(istate)%matrix)
          CALL cp_fm_create(evecs_new(istate)%matrix, fm_struct)
          CALL cp_fm_create(Ab_vecs(istate)%matrix, fm_struct)
+         CALL cp_fm_set_all(Ab_vecs(istate)%matrix, 0.0_dp)
       END DO
       CALL cp_fm_struct_release(fm_struct)
 
@@ -397,13 +398,13 @@ CONTAINS
          CALL tddfpt_apply_kernel(a_kv=ssaction_matrix, alpha=2.0_dp, evecs=evecs(:subspace_size), mos_occ=mos_occ, &
                                   xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                   qs_env=qs_env, matrix_s=matrix_s(1)%matrix, xc_section=xc_section, Ab_vecs = Ab_vecs)
-         write(6,*) ssaction_matrix
+         !write(6,*) ssaction_matrix
 
          ! add contribution from exact exchange terms
          IF (do_hfx) &
             CALL tddfpt_apply_hfx(a_kv=ssaction_matrix, K_ij_munu=K_ij_munu, alpha=C_hf, evecs=evecs(:subspace_size),&
                                   qs_env=qs_env, Ab_vecs = Ab_vecs)
-         write(6,*) ssaction_matrix
+         !write(6,*) ssaction_matrix
 
          ! solve the eigenproblem for action matrix
 
@@ -452,38 +453,28 @@ CONTAINS
          !Make new guess vectors
          !Add subspace expansion here??
 
-         !CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
-         !DO istate = subspace_size, subspace_size + nstates
+         CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
+
+         !CALL cp_fm_set_all(R(spin)%matrix, 0.0_dp)
+         DO istate = subspace_size+1, subspace_size+nstates
+            DO jstate = 1, subspace_size
+               CALL cp_fm_to_fm(Ab_vecs(jstate)%matrix, evecs_new(istate)%matrix)
+               !CALL cp_fm_scale_and_add(ssaction_matrix(jstate,istate), evecs_new(istate)%matrix, &
+               !     -evals_prev(istate)*ssaction_matrix(jstate,istate), Sb(j, spin)%matrix)
+               CALL cp_fm_scale_and_add(ssaction_matrix(jstate,istate), evecs_new(istate)%matrix)
+            END DO
+         END DO
+
+         !DO istate = 1, subspace_size
          !   CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
-         !
+         ! 
          !   DO jstate = 1, subspace_size
          !      CALL cp_fm_scale_and_add(1.0_dp, evecs_new(istate)%matrix, &
          !                               ssaction_matrix(jstate, istate), evecs(jstate)%matrix)
          !   END DO
          !END DO
 
-         !CALL cp_fm_set_all(R(spin)%matrix, 0.0_dp)
-         !DO j = 1, k-i
-         !   CALL cp_fm_to_fm(Ab(j, spin)%matrix, X(spin)%matrix)
-         !   CALL cp_fm_scale_and_add(1.0_dp, X(spin)%matrix, &
-         !        -evals(iev, iter-1), Sb(j, spin)%matrix)
-         !   CALL cp_fm_get_element(Us%matrix, j, iev, tmp)
-         !   CALL cp_fm_scale_and_add(1.0_dp, R(spin)%matrix, &
-         !        tmp, X(spin)%matrix)
-         !END DO
-
-
-         CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
-         DO istate = subspace_size, subspace_size + nstates
-            CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
-         
-            DO jstate = 1, subspace_size
-               CALL cp_fm_scale_and_add(1.0_dp, evecs_new(istate)%matrix, &
-                                        ssaction_matrix(jstate, istate), evecs(jstate)%matrix)
-            END DO
-         END DO
-
-         DO istate = subspace_size, subspace_size+nstates
+         DO istate = subspace_size+1, subspace_size+nstates
             CALL tddfpt_orthogonalize_psi1_psi0(evecs_new(istate)%matrix, C0_C0T_S)
             CALL tddfpt_orthonormalize_psi1_psi1(evecs_new, matrix_s(1)%matrix, istate)
 
@@ -491,6 +482,7 @@ CONTAINS
          END DO
 
          subspace_size = subspace_size + nstates
+
          DEALLOCATE (ssaction_matrix)
 
       END DO
@@ -1055,9 +1047,9 @@ CONTAINS
          CALL cp_dbcsr_set(J_ia_munu%matrix, 0.0_dp)
          CALL integrate_v_rspace(v_rspace=v_rspace, hmat=J_ia_munu, qs_env=qs_env, calculate_forces=.FALSE., gapw=.FALSE.)
 
-         CALL copy_dbcsr_to_fm(J_ia_munu%matrix, Ab_vecs(20)%matrix)
-         CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, &
-              1.0_dp, Ab_vecs(20)%matrix)
+         !CALL copy_dbcsr_to_fm(J_ia_munu%matrix, Ab_vecs(20)%matrix)
+         !CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, &
+         !     1.0_dp, Ab_vecs(20)%matrix)
 
          CALL cp_dbcsr_sm_fm_multiply(J_ia_munu%matrix, mos_occ, J_ia_jnu, ncol=nmo, alpha=1.0_dp, beta=0.0_dp)
          DO istate = 1, jstate
@@ -1203,8 +1195,8 @@ CONTAINS
          CALL cp_dbcsr_set(F_ia_munu%matrix, 0.0_dp)
          CALL integrate_v_rspace(v_rspace=v_xc(1), hmat=F_ia_munu, qs_env=qs_env, calculate_forces=.FALSE., gapw=.FALSE.)
 
-         CALL copy_dbcsr_to_fm(F_ia_munu%matrix, Ab_vecs(20)%matrix)
-         CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, 1.0_dp, Ab_vecs(20)%matrix)
+         !CALL copy_dbcsr_to_fm(F_ia_munu%matrix, Ab_vecs(20)%matrix)
+         !CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, 1.0_dp, Ab_vecs(20)%matrix)
 
          CALL cp_dbcsr_sm_fm_multiply(F_ia_munu%matrix, mos_occ, F_ia_jnu, ncol=nmo, alpha=1.0_dp, beta=0.0_dp)
 
