@@ -138,18 +138,19 @@ CONTAINS
 
       CHARACTER(len=20)                                  :: navail_str, nstates_str
       INTEGER :: energy_unit, handle, istate, iter, jstate, log_unit, nao, niters, nmo_occ_active, &
-         nmo_occ_total, nspins_save, nstates, nstates_total
+         nmo_occ_total, nspins_save, nstates, nstates_total, subspace_size
       LOGICAL                                            :: do_hfx
       REAL(kind=dp)                                      :: C_hf, conv, t1, t2
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_last, evals_occ, evals_prev, &
                                                             evals_virt
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: action_matrix
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: action_matrix, ssaction_matrix
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_ks, matrix_s, rho_ij_ao
-      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: evecs, evecs_new, K_ij_munu
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: evecs, evecs_new, K_ij_munu, Ab_vecs
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type), POINTER                          :: C0_C0T_S, evecs_a_fm, matrix_a_fm, &
-                                                            mos_occ, mos_virt, rho_ij_fm
+                                                            mos_occ, mos_virt, rho_ij_fm, &
+                                                            ssevecs_a_fm, ssmatrix_a_fm
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -291,6 +292,8 @@ CONTAINS
       nstates_total = SIZE(evecs)
       ALLOCATE (evals_last(nstates_total))
 
+      write(6,*) "nstates and nstates_total are", nstates, nstates_total
+
       CALL cp_print_key_finished_output(log_unit, logger, tddfpt_section, "PRINT%GUESS_VECTORS")
 
       ! the number of occupied molecular orbitals in the active space
@@ -299,9 +302,13 @@ CONTAINS
       ! ++ temporary matrices needed to update trial wectors
       CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_occ_active, para_env=para_env, context=blacs_env)
       ALLOCATE (evecs_new(nstates_total))
+      ALLOCATE (Ab_vecs(nstates_total))
+
       DO istate = 1, nstates_total
          NULLIFY (evecs_new(istate)%matrix)
+         NULLIFY (Ab_vecs(istate)%matrix)
          CALL cp_fm_create(evecs_new(istate)%matrix, fm_struct)
+         CALL cp_fm_create(Ab_vecs(istate)%matrix, fm_struct)
       END DO
       CALL cp_fm_struct_release(fm_struct)
 
@@ -354,32 +361,57 @@ CONTAINS
       IF (do_hfx) &
          CALL tddfpt_compute_hfx(K_ij_munu=K_ij_munu, mos_occ=mos_occ, qs_env=qs_env, matrix_s=matrix_s(1)%matrix)
 
+      subspace_size = nstates
+      NULLIFY (ssmatrix_a_fm, ssevecs_a_fm)
+
       DO iter = 1, niters
          CALL cp_iterate(logger%iter_info, last=.FALSE., iter_nr=iter)
 
+         ! ++ subspace action matrix and its eigenvectors
+
+         IF (ASSOCIATED(ssmatrix_a_fm)) CALL cp_fm_release(ssmatrix_a_fm)
+         IF (ASSOCIATED(ssevecs_a_fm)) CALL cp_fm_release(ssevecs_a_fm)
+
+         ALLOCATE (ssaction_matrix(subspace_size, subspace_size))
+         NULLIFY (ssmatrix_a_fm, ssevecs_a_fm)
+         CALL cp_fm_struct_create(fm_struct, nrow_global=subspace_size, ncol_global=subspace_size, &
+              para_env=para_env, context=blacs_env)
+         CALL cp_fm_create(ssmatrix_a_fm, fm_struct)
+         CALL cp_fm_create(ssevecs_a_fm, fm_struct)
+         CALL cp_fm_struct_release(fm_struct)
+
          ! initialise the upper-triangular 'action_matrix' by computing (for i <= j)
          ! trace { C_{1,i}^T * ( KS * C_{1,j} - S * C_{1,j} * diag(evals_occ) ) }
-         CALL tddfpt_init_by_energy_diff(a_kv=action_matrix, evecs=evecs, evals_occ=evals_occ, &
+         CALL tddfpt_init_by_energy_diff(a_kv=ssaction_matrix, evecs=evecs(:subspace_size), evals_occ=evals_occ, &
                                          matrix_ks=matrix_ks(ispin)%matrix, matrix_s=matrix_s(1)%matrix)
+         !write(6,*) ssaction_matrix
 
          ! add contributions from coulomb terms
          ! alpha == 2 due to singlet state
-         CALL tddfpt_apply_coulomb(a_kv=action_matrix, alpha=2.0_dp, evecs=evecs, mos_occ=mos_occ, &
-                                   qs_env=qs_env, matrix_s=matrix_s(1)%matrix)
+         CALL tddfpt_apply_coulomb(a_kv=ssaction_matrix, alpha=2.0_dp, evecs=evecs(:subspace_size), mos_occ=mos_occ, &
+                                   qs_env=qs_env, matrix_s=matrix_s(1)%matrix, Ab_vecs = Ab_vecs)
+         !write(6,*) ssaction_matrix
 
          ! add contributions from the adiabatic TDDFT kernel
          ! alpha == 2 due to relation K_alpha,alpha == K_alpha,beta for singlet states
-         CALL tddfpt_apply_kernel(a_kv=action_matrix, alpha=2.0_dp, evecs=evecs, mos_occ=mos_occ, &
+         CALL tddfpt_apply_kernel(a_kv=ssaction_matrix, alpha=2.0_dp, evecs=evecs(:subspace_size), mos_occ=mos_occ, &
                                   xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
-                                  qs_env=qs_env, matrix_s=matrix_s(1)%matrix, xc_section=xc_section)
+                                  qs_env=qs_env, matrix_s=matrix_s(1)%matrix, xc_section=xc_section, Ab_vecs = Ab_vecs)
+         write(6,*) ssaction_matrix
 
          ! add contribution from exact exchange terms
          IF (do_hfx) &
-            CALL tddfpt_apply_hfx(a_kv=action_matrix, K_ij_munu=K_ij_munu, alpha=C_hf, evecs=evecs, qs_env=qs_env)
+            CALL tddfpt_apply_hfx(a_kv=ssaction_matrix, K_ij_munu=K_ij_munu, alpha=C_hf, evecs=evecs(:subspace_size),&
+                                  qs_env=qs_env, Ab_vecs = Ab_vecs)
+         write(6,*) ssaction_matrix
 
          ! solve the eigenproblem for action matrix
-         CALL cp_fm_set_submatrix(matrix_a_fm, action_matrix)
-         CALL choose_eigv_solver(matrix_a_fm, evecs_a_fm, evals_last)
+
+         DEALLOCATE (evals_last)
+         ALLOCATE (evals_last(subspace_size))
+
+         CALL cp_fm_set_submatrix(ssmatrix_a_fm, ssaction_matrix)
+         CALL choose_eigv_solver(ssmatrix_a_fm, ssevecs_a_fm, evals_last)
 
          t2 = m_walltime()
 
@@ -407,6 +439,9 @@ CONTAINS
          END IF
 
          t1 = t2
+         write(6,*) "evals_prev", evals_prev
+         write(6,*) "evals_last", evals_last
+
          evals_prev(1:nstates) = evals_last(1:nstates)
 
          IF (conv <= tddfpt_control%conv) THEN
@@ -414,22 +449,49 @@ CONTAINS
             EXIT
          END IF
 
-         CALL cp_fm_get_submatrix(evecs_a_fm, action_matrix)
-         DO istate = 1, nstates_total
-            CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
+         !Make new guess vectors
+         !Add subspace expansion here??
 
-            DO jstate = 1, nstates_total
+         !CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
+         !DO istate = subspace_size, subspace_size + nstates
+         !   CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
+         !
+         !   DO jstate = 1, subspace_size
+         !      CALL cp_fm_scale_and_add(1.0_dp, evecs_new(istate)%matrix, &
+         !                               ssaction_matrix(jstate, istate), evecs(jstate)%matrix)
+         !   END DO
+         !END DO
+
+         !CALL cp_fm_set_all(R(spin)%matrix, 0.0_dp)
+         !DO j = 1, k-i
+         !   CALL cp_fm_to_fm(Ab(j, spin)%matrix, X(spin)%matrix)
+         !   CALL cp_fm_scale_and_add(1.0_dp, X(spin)%matrix, &
+         !        -evals(iev, iter-1), Sb(j, spin)%matrix)
+         !   CALL cp_fm_get_element(Us%matrix, j, iev, tmp)
+         !   CALL cp_fm_scale_and_add(1.0_dp, R(spin)%matrix, &
+         !        tmp, X(spin)%matrix)
+         !END DO
+
+
+         CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
+         DO istate = subspace_size, subspace_size + nstates
+            CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
+         
+            DO jstate = 1, subspace_size
                CALL cp_fm_scale_and_add(1.0_dp, evecs_new(istate)%matrix, &
-                                        action_matrix(jstate, istate), evecs(jstate)%matrix)
+                                        ssaction_matrix(jstate, istate), evecs(jstate)%matrix)
             END DO
          END DO
 
-         DO istate = 1, nstates_total
+         DO istate = subspace_size, subspace_size+nstates
             CALL tddfpt_orthogonalize_psi1_psi0(evecs_new(istate)%matrix, C0_C0T_S)
             CALL tddfpt_orthonormalize_psi1_psi1(evecs_new, matrix_s(1)%matrix, istate)
 
             CALL cp_fm_to_fm(evecs_new(istate)%matrix, evecs(istate)%matrix)
          END DO
+
+         subspace_size = subspace_size + nstates
+         DEALLOCATE (ssaction_matrix)
 
       END DO
 
@@ -905,10 +967,11 @@ CONTAINS
 !> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
 !>       Mohamed Fawzi on 10.2002.
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_apply_coulomb(a_kv, alpha, evecs, mos_occ, qs_env, matrix_s)
+   SUBROUTINE tddfpt_apply_coulomb(a_kv, alpha, evecs, mos_occ, qs_env, matrix_s, Ab_vecs)
       REAL(kind=dp), DIMENSION(:, :), INTENT(out)        :: a_kv
       REAL(kind=dp), INTENT(in)                          :: alpha
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evecs
+      TYPE(cp_fm_p_type), DIMENSION(:)                   :: Ab_vecs
       TYPE(cp_fm_type), POINTER                          :: mos_occ
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
@@ -940,6 +1003,7 @@ CONTAINS
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, poisson_env=poisson_env)
 
       nstates = SIZE(evecs)
+      write(6,*) "nstates in coulomb", nstates
       CALL cp_fm_get_info(matrix=evecs(1)%matrix, nrow_global=nao, ncol_global=nmo)
 
       NULLIFY (rho_ia_ao)
@@ -991,6 +1055,10 @@ CONTAINS
          CALL cp_dbcsr_set(J_ia_munu%matrix, 0.0_dp)
          CALL integrate_v_rspace(v_rspace=v_rspace, hmat=J_ia_munu, qs_env=qs_env, calculate_forces=.FALSE., gapw=.FALSE.)
 
+         CALL copy_dbcsr_to_fm(J_ia_munu%matrix, Ab_vecs(20)%matrix)
+         CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, &
+              1.0_dp, Ab_vecs(20)%matrix)
+
          CALL cp_dbcsr_sm_fm_multiply(J_ia_munu%matrix, mos_occ, J_ia_jnu, ncol=nmo, alpha=1.0_dp, beta=0.0_dp)
          DO istate = 1, jstate
             CALL cp_fm_trace(evecs(istate)%matrix, J_ia_jnu, J_ia_jb)
@@ -1026,10 +1094,12 @@ CONTAINS
 !> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
 !>       Mohamed Fawzi on 10.2002.
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_apply_kernel(a_kv, alpha, evecs, mos_occ, xc_rho_set, xc_deriv_set, qs_env, matrix_s, xc_section)
+   SUBROUTINE tddfpt_apply_kernel(a_kv, alpha, evecs, mos_occ, xc_rho_set, xc_deriv_set, qs_env, matrix_s,&
+        xc_section, Ab_vecs)
       REAL(kind=dp), DIMENSION(:, :), INTENT(out)        :: a_kv
       REAL(kind=dp), INTENT(in)                          :: alpha
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evecs
+      TYPE(cp_fm_p_type), DIMENSION(:)                   :: Ab_vecs
       TYPE(cp_fm_type), POINTER                          :: mos_occ
       TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set
       TYPE(xc_derivative_set_type), POINTER              :: xc_deriv_set
@@ -1132,6 +1202,9 @@ CONTAINS
 
          CALL cp_dbcsr_set(F_ia_munu%matrix, 0.0_dp)
          CALL integrate_v_rspace(v_rspace=v_xc(1), hmat=F_ia_munu, qs_env=qs_env, calculate_forces=.FALSE., gapw=.FALSE.)
+
+         CALL copy_dbcsr_to_fm(F_ia_munu%matrix, Ab_vecs(20)%matrix)
+         CALL cp_fm_scale_and_add(1.0_dp, Ab_vecs(jstate)%matrix, 1.0_dp, Ab_vecs(20)%matrix)
 
          CALL cp_dbcsr_sm_fm_multiply(F_ia_munu%matrix, mos_occ, F_ia_jnu, ncol=nmo, alpha=1.0_dp, beta=0.0_dp)
 
@@ -1256,9 +1329,10 @@ CONTAINS
 !> \par History
 !>    * 05.2016 compute all exact-exchange terms in one go [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_apply_hfx(a_kv, K_ij_munu, evecs, alpha, qs_env)
+   SUBROUTINE tddfpt_apply_hfx(a_kv, K_ij_munu, evecs, alpha, qs_env, Ab_vecs)
       REAL(kind=dp), DIMENSION(:, :), INTENT(out)        :: a_kv
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: K_ij_munu, evecs
+      TYPE(cp_fm_p_type), DIMENSION(:)                   :: Ab_vecs
       REAL(kind=dp), INTENT(in)                          :: alpha
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
