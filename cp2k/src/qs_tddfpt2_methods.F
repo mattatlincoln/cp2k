@@ -146,7 +146,7 @@ CONTAINS
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: action_matrix, ssaction_matrix
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_ks, matrix_s, rho_ij_ao
-      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: evecs, evecs_new, K_ij_munu, Ab_vecs
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: evecs, evecs_new, K_ij_munu, Ab_vecs, Sb_vecs
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type), POINTER                          :: C0_C0T_S, evecs_a_fm, matrix_a_fm, &
                                                             mos_occ, mos_virt, rho_ij_fm, &
@@ -292,8 +292,6 @@ CONTAINS
       nstates_total = SIZE(evecs)
       ALLOCATE (evals_last(nstates_total))
 
-      write(6,*) "nstates and nstates_total are", nstates, nstates_total
-
       CALL cp_print_key_finished_output(log_unit, logger, tddfpt_section, "PRINT%GUESS_VECTORS")
 
       ! the number of occupied molecular orbitals in the active space
@@ -303,12 +301,14 @@ CONTAINS
       CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_occ_active, para_env=para_env, context=blacs_env)
       ALLOCATE (evecs_new(nstates_total))
       ALLOCATE (Ab_vecs(nstates_total))
+      ALLOCATE (Sb_vecs(nstates_total))
 
       DO istate = 1, nstates_total
          NULLIFY (evecs_new(istate)%matrix)
-         NULLIFY (Ab_vecs(istate)%matrix)
+         NULLIFY (Ab_vecs(istate)%matrix, Sb_vecs(istate)%matrix)
          CALL cp_fm_create(evecs_new(istate)%matrix, fm_struct)
          CALL cp_fm_create(Ab_vecs(istate)%matrix, fm_struct)
+         CALL cp_fm_create(Sb_vecs(istate)%matrix, fm_struct)
          CALL cp_fm_set_all(Ab_vecs(istate)%matrix, 0.0_dp)
       END DO
       CALL cp_fm_struct_release(fm_struct)
@@ -365,6 +365,11 @@ CONTAINS
       subspace_size = nstates
       NULLIFY (ssmatrix_a_fm, ssevecs_a_fm)
 
+      DO istate = 1, nstates
+         CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, evecs_new(istate)%matrix, Sb_vecs(istate)%matrix, &
+                                   ncol=nmo_occ_active, alpha=1.0_dp, beta=0.0_dp)
+      END DO
+
       DO iter = 1, niters
          CALL cp_iterate(logger%iter_info, last=.FALSE., iter_nr=iter)
 
@@ -374,6 +379,7 @@ CONTAINS
          IF (ASSOCIATED(ssevecs_a_fm)) CALL cp_fm_release(ssevecs_a_fm)
 
          ALLOCATE (ssaction_matrix(subspace_size, subspace_size))
+         ssaction_matrix = 0.0_dp
          NULLIFY (ssmatrix_a_fm, ssevecs_a_fm)
          CALL cp_fm_struct_create(fm_struct, nrow_global=subspace_size, ncol_global=subspace_size, &
               para_env=para_env, context=blacs_env)
@@ -385,26 +391,26 @@ CONTAINS
          ! trace { C_{1,i}^T * ( KS * C_{1,j} - S * C_{1,j} * diag(evals_occ) ) }
          CALL tddfpt_init_by_energy_diff(a_kv=ssaction_matrix, evecs=evecs(:subspace_size), evals_occ=evals_occ, &
                                          matrix_ks=matrix_ks(ispin)%matrix, matrix_s=matrix_s(1)%matrix)
-         !write(6,*) ssaction_matrix
+         write(6,*)"epsilon", ssaction_matrix
 
          ! add contributions from coulomb terms
          ! alpha == 2 due to singlet state
          CALL tddfpt_apply_coulomb(a_kv=ssaction_matrix, alpha=2.0_dp, evecs=evecs(:subspace_size), mos_occ=mos_occ, &
                                    qs_env=qs_env, matrix_s=matrix_s(1)%matrix, Ab_vecs = Ab_vecs)
-         !write(6,*) ssaction_matrix
+         write(6,*)"coulomb",  ssaction_matrix
 
          ! add contributions from the adiabatic TDDFT kernel
          ! alpha == 2 due to relation K_alpha,alpha == K_alpha,beta for singlet states
          CALL tddfpt_apply_kernel(a_kv=ssaction_matrix, alpha=2.0_dp, evecs=evecs(:subspace_size), mos_occ=mos_occ, &
                                   xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                   qs_env=qs_env, matrix_s=matrix_s(1)%matrix, xc_section=xc_section, Ab_vecs = Ab_vecs)
-         !write(6,*) ssaction_matrix
+         write(6,*) "kernel", ssaction_matrix
 
          ! add contribution from exact exchange terms
          IF (do_hfx) &
             CALL tddfpt_apply_hfx(a_kv=ssaction_matrix, K_ij_munu=K_ij_munu, alpha=C_hf, evecs=evecs(:subspace_size),&
                                   qs_env=qs_env, Ab_vecs = Ab_vecs)
-         !write(6,*) ssaction_matrix
+         write(6,*) "exchange", ssaction_matrix
 
          ! solve the eigenproblem for action matrix
 
@@ -455,30 +461,20 @@ CONTAINS
 
          CALL cp_fm_get_submatrix(ssevecs_a_fm, ssaction_matrix)
 
-         !CALL cp_fm_set_all(R(spin)%matrix, 0.0_dp)
-         DO istate = subspace_size+1, subspace_size+nstates
+         DO istate = 1, nstates
             DO jstate = 1, subspace_size
-               CALL cp_fm_to_fm(Ab_vecs(jstate)%matrix, evecs_new(istate)%matrix)
-               !CALL cp_fm_scale_and_add(ssaction_matrix(jstate,istate), evecs_new(istate)%matrix, &
-               !     -evals_prev(istate)*ssaction_matrix(jstate,istate), Sb(j, spin)%matrix)
-               CALL cp_fm_scale_and_add(ssaction_matrix(jstate,istate), evecs_new(istate)%matrix)
+               CALL cp_fm_to_fm(Ab_vecs(jstate)%matrix, evecs_new(subspace_size+istate)%matrix)
+               CALL cp_fm_scale_and_add(ssaction_matrix(jstate,istate), evecs_new(istate)%matrix, &
+                    -evals_prev(istate)*ssaction_matrix(jstate,istate), Sb_vecs(jstate)%matrix)
             END DO
          END DO
-
-         !DO istate = 1, subspace_size
-         !   CALL cp_fm_set_all(evecs_new(istate)%matrix, 0.0_dp)
-         ! 
-         !   DO jstate = 1, subspace_size
-         !      CALL cp_fm_scale_and_add(1.0_dp, evecs_new(istate)%matrix, &
-         !                               ssaction_matrix(jstate, istate), evecs(jstate)%matrix)
-         !   END DO
-         !END DO
 
          DO istate = subspace_size+1, subspace_size+nstates
             CALL tddfpt_orthogonalize_psi1_psi0(evecs_new(istate)%matrix, C0_C0T_S)
             CALL tddfpt_orthonormalize_psi1_psi1(evecs_new, matrix_s(1)%matrix, istate)
-
             CALL cp_fm_to_fm(evecs_new(istate)%matrix, evecs(istate)%matrix)
+            CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, evecs_new(istate)%matrix, Sb_vecs(istate)%matrix, &
+                 ncol=nmo_occ_active, alpha=1.0_dp, beta=0.0_dp)
          END DO
 
          subspace_size = subspace_size + nstates
@@ -920,6 +916,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       nstates = SIZE(evecs)
+      write(6,*) "nstates in epsilon", nstates
 
       NULLIFY (fm_struct, s_psi1_fm)
       CALL cp_fm_get_info(matrix=evecs(1)%matrix, ncol_global=nmo, matrix_struct=fm_struct)
@@ -935,6 +932,7 @@ CONTAINS
 
          DO istate = 1, jstate
             CALL cp_fm_trace(evecs(istate)%matrix, ks_psi1_fm, a_kv(istate, jstate))
+            write(6,*) "istate, jstate, a_kv_ij", istate, jstate, a_kv(istate, jstate)
          END DO
       END DO
 
