@@ -119,6 +119,11 @@ MODULE qs_tddfpt4_methods
    PUBLIC :: tddfpt
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_tddfpt4_methods'
 
+! **************************************************************************************************
+!> \brief Single-determinant guess vector descriptor
+!> \par History
+!>   * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
    TYPE tddfpt_state_descriptor
       !> index of occupied MO to deoccupy
       INTEGER :: imo_occ
@@ -126,31 +131,49 @@ MODULE qs_tddfpt4_methods
       INTEGER :: imo_virt
    END TYPE tddfpt_state_descriptor
 
-   TYPE tddfpt_trial_vectors
-      !> a singly-excited determinant (imo_occ -> imo_virt) if it is enough to describe the excited state
+! **************************************************************************************************
+!> \brief Time-Dependent DFT guess vectors
+!> \par History
+!>   * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
+   TYPE tddfpt_guess_vectors
+      !> collection of single-determinant guess vectors (imo_occ -> imo_virt)
+      !> ordered by their transition energies
       TYPE(tddfpt_state_descriptor), ALLOCATABLE, DIMENSION(:) :: descrs
-      !> since the davidson eigensolver has been restartes, this array holds responce wave-funcions
-      !> for the requested number of excited states
-      TYPE(cp_fm_p_type),            ALLOCATABLE, DIMENSION(:) :: evects
-   END TYPE tddfpt_trial_vectors
+      !> transition energies
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: evals
+   END TYPE tddfpt_guess_vectors
 
-   !     nvect
-   !   <-------->
-   !  |----------|----------|   ===============
-   !  | . d                 |    /|\ n    n /|\
-   !  |d  . i      lower    |     |  v    o  |
-   !  |  i  . a    triangle |     |  e << c  |
-   !  |    a  . g    ^T     |    \|/ c    c  |
-   !  |      g_ .|----------|   ==== t    *  |
-   !  |        g |.  UNDEF  |             n  |
-   !  | lower    |u .       |             v  |
-   !  | triangle |  e .     |             i  |
-   !  |          |    s .   |             r  |
-   !  |          |UNDEF s . |             t \|/
-   !  |----------|----------|   ===============
+! **************************************************************************************************
+!> \brief Time-Dependent DFT action matrix
+!> \par History
+!>   * 06.2016 created [Sergey Chulkov]
+!
+!      |----------|-------------|
+!      | . d                    |
+!      |g  . i      lower_      |
+!      |  u  . a    triangle    |
+!      |    e  . g    ^T        |
+!      |      s  .|-------------|
+!      |        s |.            |
+!      | lower_   |% .   UNDEF  |
+!      | triangle |  e .        |
+!      |          |    v .      |
+!      |          |      a .    |
+!      |          | UNDEF  l .  |
+!      |          |          s .|
+!      |----------|-------------|
+!      <- nvects ->
+!
+!      <----- nocc * nvirt ----->
+! **************************************************************************************************
    TYPE tddfpt_action_matrix
+      !> rectangular matrix of dimensions (nocc*nvirt, nvects) which stores
+      !> the lower triangular part of the action matrix. All diagonal and
+      !> upper-triangular elements are set to zero
       TYPE(cp_fm_type), POINTER                :: lower_triangle
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: diag, diag_guess
+      !> diagonal part of the action matrix
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: diag
    END TYPE tddfpt_action_matrix
 
 CONTAINS
@@ -182,7 +205,7 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
 
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
 
-      TYPE(tddfpt_trial_vectors)                         :: trial_vectors
+      TYPE(tddfpt_guess_vectors)                         :: guess_vectors
       TYPE(tddfpt_action_matrix)                         :: action_matrix
       REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE         :: krylov_vectors
 
@@ -259,7 +282,7 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
       nstates = tddfpt_control%nstates
 
       log_unit = cp_print_key_unit_nr(logger, tddfpt_section, "PRINT%GUESS_VECTORS", extension=".tddfptLog")
-      CALL tddfpt_guess(guess_vectors=trial_vectors, guess_evals=action_matrix%diag_guess, &
+      CALL tddfpt_guess(guess_vectors=guess_vectors, &
                         nstates=nstates, nstates_active=nstates+tddfpt_control%added_states, &
                         evals_occ=evals_occ, evals_virt=evals_virt, &
                         is_add_degenerate=tddfpt_control%add_degenerate, &
@@ -267,7 +290,7 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
                         log_unit=log_unit)
       CALL cp_print_key_finished_output(log_unit, logger, tddfpt_section, "PRINT%GUESS_VECTORS")
 
-      nstates_total = SIZE(action_matrix%diag_guess)
+      nstates_total = SIZE(guess_vectors%evals)
 
      ! ++ initialise xc_rho_set and xc_deriv_set (needed for kernel in adiabatic approximation)
       NULLIFY (pw_env)
@@ -309,7 +332,7 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
       ! ++ Krylov vectors
       ALLOCATE(evals_last(nstates))
       ALLOCATE(evals_prev(nstates))
-      evals_prev(1:nstates) = action_matrix%diag_guess(1:nstates)
+      evals_prev(1:nstates) = guess_vectors%evals(1:nstates)
 
 max_krylov_vects = max_krylov_vects_param
       IF (max_krylov_vects > nstates_total) max_krylov_vects = nstates_total
@@ -349,7 +372,7 @@ max_krylov_vects = max_krylov_vects_param
       DO iter = 1,niters
          CALL cp_iterate(logger%iter_info, last=.FALSE., iter_nr=iter)
 
-         nvects_new = tddfpt_am_expand(action_matrix, nvects_new=nstates, &
+         nvects_new = tddfpt_am_expand(action_matrix, nstates_total=nstates_total, nvects_new=nstates, &
                                     nvects_max=max_krylov_vects, blacs_env=blacs_env, para_env=para_env)
          nvects_exists = nvects_exists + nvects_new
 
@@ -357,23 +380,22 @@ max_krylov_vects = max_krylov_vects_param
             ! maximum number of Krylov vectors has been reached, restart the Davidson eigensolver
             CALL tddfpt_davidson_restart(krylov_vectors=krylov_vectors(:,1:nvects_exists), &
                                          nstates=nstates, action_matrix=action_matrix, &
+                                         diag_guess=guess_vectors%evals, &
                                          blacs_env=blacs_env, para_env=para_env)
-            CALL tddfpt_am_release(action_matrix, keep_guess=.TRUE.)
-            nvects_new = tddfpt_am_expand(action_matrix, nvects_new=nstates, &
+            CALL tddfpt_am_release(action_matrix)
+            nvects_new = tddfpt_am_expand(action_matrix, nstates_total=nstates_total, nvects_new=nstates, &
                                           nvects_max=max_krylov_vects, blacs_env=blacs_env, para_env=para_env)
             nvects_exists = nvects_new
             IF (log_unit > 0) &
                WRITE(log_unit, '(1X,10("-"),1X,A,1X,11("-"))') "Restart Davidson iterations"
          END IF
-!DO irestart = 1,nrestarts
-!IF (log_unit > 0) WRITE(log_unit,'(/,A,I4)') 'DAVIDSON CYCLE NO. ', irestart
 
          CALL tddfpt_assemble_evects(evects=evects(nvects_exists-nvects_new+1:nvects_exists), &
                                      krylov_vectors=krylov_vectors(:,nvects_exists-nvects_new+1:nvects_exists), &
-                                     trial_vectors=trial_vectors, mos_virt=mos_virt)
+                                     guess_vectors=guess_vectors, mos_virt=mos_virt)
 
          CALL tddfpt_am_compute(action_matrix=action_matrix, nvects_new=nvects_new, &
-                                evects=evects(1:nvects_exists), trial_vectors=trial_vectors, &
+                                evects=evects(1:nvects_exists), guess_vectors=guess_vectors, &
                                 mos_occ=mos_occ, evals_occ=evals_occ, mos_virt=mos_virt, &
                                 qs_env=qs_env, matrix_ks=matrix_ks(1)%matrix, matrix_s=matrix_s(1)%matrix, &
                                 xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, xc_section=xc_section)
@@ -381,6 +403,7 @@ max_krylov_vects = max_krylov_vects_param
 
          CALL tddfpt_davidson_iteration(residual_vectors=krylov_vectors(:,nvects_exists+1:nvects_exists+nstates), &
                                         evals=evals_last, action_matrix=action_matrix, &
+                                        diag_guess=guess_vectors%evals, &
                                         krylov_vectors=krylov_vectors(:,1:nvects_exists), &
                                         blacs_env=blacs_env, para_env=para_env)
 
@@ -436,10 +459,11 @@ max_krylov_vects = max_krylov_vects_param
 
       CALL tddfpt_davidson_restart(krylov_vectors=krylov_vectors(:,1:nvects_exists), &
                                    nstates=nstates, action_matrix=action_matrix, &
+                                   diag_guess=guess_vectors%evals, &
                                    blacs_env=blacs_env, para_env=para_env)
       CALL tddfpt_assemble_evects(evects=evects(1:nstates), &
                                   krylov_vectors=krylov_vectors(:,1:nstates), &
-                                  trial_vectors=trial_vectors, mos_virt=mos_virt)
+                                  guess_vectors=guess_vectors, mos_virt=mos_virt)
 
       log_unit = cp_logger_get_default_io_unit()
       CALL tddfpt_print_summary(log_unit=log_unit, nstates=nstates, &
@@ -454,14 +478,12 @@ max_krylov_vects = max_krylov_vects_param
       DEALLOCATE(evects)
 
       DEALLOCATE(evals_last)
-      CALL tddfpt_am_release(action_matrix, keep_guess=.FALSE.)
+      CALL tddfpt_am_release(action_matrix)
 
-      IF (ALLOCATED(trial_vectors%evects)) THEN
-         DO istate = SIZE(trial_vectors%evects), 1, -1
-            CALL cp_fm_release(trial_vectors%evects(istate)%matrix)
-         END DO
-      END IF
-      IF (ALLOCATED(trial_vectors%descrs)) DEALLOCATE(trial_vectors%descrs)
+      IF (ALLOCATED(guess_vectors%descrs)) &
+         DEALLOCATE(guess_vectors%descrs)
+      IF (ALLOCATED(guess_vectors%evals)) &
+         DEALLOCATE(guess_vectors%evals)
 
       CALL xc_dset_release(xc_deriv_set)
       CALL xc_rho_set_release(xc_rho_set)
@@ -475,13 +497,13 @@ max_krylov_vects = max_krylov_vects_param
       CALL timestop(handle)
    END SUBROUTINE tddfpt
 
-   SUBROUTINE tddfpt_am_compute(action_matrix, nvects_new, evects, trial_vectors, mos_occ, evals_occ, mos_virt, &
+   SUBROUTINE tddfpt_am_compute(action_matrix, nvects_new, evects, guess_vectors, mos_occ, evals_occ, mos_virt, &
                                qs_env, matrix_ks, matrix_s, xc_rho_set, xc_deriv_set, xc_section)
       TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
       INTEGER, INTENT(in) :: nvects_new
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
 !      REAL(kind=dp), DIMENSION(:,:), INTENT(in)          :: krylov_vectors
-      TYPE(tddfpt_trial_vectors), INTENT(in)             :: trial_vectors
+      TYPE(tddfpt_guess_vectors), INTENT(in)             :: guess_vectors
       TYPE(cp_fm_type), POINTER                          :: mos_occ
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals_occ
       TYPE(cp_fm_type), POINTER                          :: mos_virt
@@ -495,7 +517,7 @@ max_krylov_vects = max_krylov_vects_param
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:) :: block_nn, block_gn, block_on
 
       nvects_exists = SIZE(evects)
-      nstates_total = SIZE(action_matrix%diag_guess)
+      nstates_total = SIZE(guess_vectors%evals)
 
       CPASSERT(SIZE(action_matrix%diag) == nvects_exists)
       nvects_old    = nvects_exists - nvects_new
@@ -524,34 +546,32 @@ max_krylov_vects = max_krylov_vects_param
 
       ! add contributions from coulomb terms
       ! alpha == 2 due to singlet state
-      CALL tddfpt_apply_coulomb(block_nn=block_nn, block_gn=block_gn, block_on=block_on, alpha=2.0_dp, &
-                                evects=evects, mos_occ=mos_occ, trial_vectors=trial_vectors, &
+      CALL tddfpt_apply_coulomb(block_on=block_on, block_nn=block_nn, block_gn=block_gn, alpha=2.0_dp, &
+                                evects=evects, mos_occ=mos_occ, guess_vectors=guess_vectors, &
                                 mos_virt=mos_virt, qs_env=qs_env, matrix_s=matrix_s)
 
       ! add contributions from the adiabatic TDDFT kernel
       ! alpha == 2 due to relation K_alpha,alpha == K_alpha,beta for singlet states
-      CALL tddfpt_apply_kernel(block_nn=block_nn, block_gn=block_gn, block_on=block_on, alpha=2.0_dp, &
-                               evects=evects, mos_occ=mos_occ, trial_vectors=trial_vectors, &
+      CALL tddfpt_apply_kernel(block_on=block_on, block_nn=block_nn, block_gn=block_gn, alpha=2.0_dp, &
+                               evects=evects, mos_occ=mos_occ, guess_vectors=guess_vectors, &
                                mos_virt=mos_virt, xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                qs_env=qs_env, matrix_s=matrix_s, xc_section=xc_section)
 
-      CALL tddfpt_am_update(action_matrix=action_matrix, first_vector=nvects_old+1, &
-                            block_nn=block_nn, block_gn=block_gn, block_on=block_on)
+      CALL tddfpt_am_update(action_matrix=action_matrix, block_on=block_on, block_nn=block_nn, block_gn=block_gn)
 
       IF (ALLOCATED(block_gn)) &
          DEALLOCATE(block_gn)
-
       IF (ALLOCATED(block_on)) &
          DEALLOCATE(block_on)
-
       DEALLOCATE(block_nn)
    END SUBROUTINE tddfpt_am_compute
 
-   SUBROUTINE tddfpt_davidson_iteration(residual_vectors, evals, action_matrix, &
+   SUBROUTINE tddfpt_davidson_iteration(residual_vectors, evals, action_matrix, diag_guess, &
                                         krylov_vectors, blacs_env, para_env)
       REAL(kind=dp), DIMENSION(:,:), INTENT(out)         :: residual_vectors
       REAL(kind=dp), DIMENSION(:), INTENT(out)           :: evals
       TYPE(tddfpt_action_matrix), INTENT(in)             :: action_matrix
+      REAL(kind=dp), DIMENSION(:), INTENT(in)            :: diag_guess
       REAL(kind=dp), DIMENSION(:,:), INTENT(in)          :: krylov_vectors
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_para_env_type), POINTER                    :: para_env
@@ -568,10 +588,11 @@ max_krylov_vects = max_krylov_vects_param
       nstates = SIZE(evals)
       nstates_total = SIZE(krylov_vectors, 1)
       nvects = SIZE(krylov_vectors, 2)
-      CPASSERT(nstates <= nvects .AND. nvects <= nstates_total)
 
+      CPASSERT(nstates <= nvects .AND. nvects <= nstates_total)
       CPASSERT(ALLOCATED(action_matrix%diag))
       CPASSERT(SIZE(action_matrix%diag) == nvects)
+      CPASSERT(SIZE(diag_guess) == nstates_total)
 
       NULLIFY(fm_struct, krylov_vectors_fm, A_v_fm, vT_A_v_fm)
       CALL cp_fm_struct_create(fm_struct, nrow_global=nstates_total, ncol_global=nvects, &
@@ -587,7 +608,7 @@ max_krylov_vects = max_krylov_vects_param
       CALL cp_fm_struct_release(fm_struct)
 
       CALL cp_fm_set_submatrix(krylov_vectors_fm, krylov_vectors)
-      CALL tddfpt_am_multiply(action_matrix=action_matrix, matrix_b=krylov_vectors_fm, matrix_c=A_v_fm)
+      CALL tddfpt_am_multiply(action_matrix=action_matrix, diag_guess=diag_guess, matrix_b=krylov_vectors_fm, matrix_c=A_v_fm)
 
       CALL cp_gemm('T', 'N', nvects, nvects, nstates_total, 1.0_dp, krylov_vectors_fm, A_v_fm, 0.0_dp, vT_A_v_fm)
 
@@ -613,7 +634,7 @@ max_krylov_vects = max_krylov_vects_param
       CALL cp_fm_release(krylov_vectors_fm)
 
       ! residual = A * U - evals * U
-      CALL tddfpt_am_multiply(action_matrix=action_matrix, matrix_b=ritz_vectors_fm, matrix_c=A_v_fm)
+      CALL tddfpt_am_multiply(action_matrix=action_matrix, diag_guess=diag_guess, matrix_b=ritz_vectors_fm, matrix_c=A_v_fm)
       CALL cp_fm_column_scale(ritz_vectors_fm, evals(1:nstates))
       CALL cp_fm_scale_and_add(1.0_dp, A_v_fm, -1.0_dp, ritz_vectors_fm)
 
@@ -636,9 +657,9 @@ max_krylov_vects = max_krylov_vects_param
          END DO
 
          DO ivect = nvects+1,nstates_total
-            eref = action_matrix%diag_guess(ivect) - lambda
+            eref = diag_guess(ivect) - lambda
             IF (ABS(eref) < threshold) &
-               eref = action_matrix%diag_guess(ivect) - eref_scale * lambda
+               eref = diag_guess(ivect) - eref_scale * lambda
 
             residual_vectors(ivect, jvect) = residual_vectors(ivect, jvect) / eref
          END DO
@@ -647,10 +668,11 @@ max_krylov_vects = max_krylov_vects_param
       CALL tddfpt_orthonormalize_residual_vectors(residual_vectors, krylov_vectors)
    END SUBROUTINE tddfpt_davidson_iteration
 
-   SUBROUTINE tddfpt_davidson_restart(krylov_vectors, nstates, action_matrix, blacs_env, para_env)
+   SUBROUTINE tddfpt_davidson_restart(krylov_vectors, nstates, action_matrix, diag_guess, blacs_env, para_env)
       REAL(kind=dp), DIMENSION(:,:), INTENT(inout)       :: krylov_vectors
       INTEGER, INTENT(in)                                :: nstates
       TYPE(tddfpt_action_matrix), INTENT(in)             :: action_matrix
+      REAL(kind=dp), DIMENSION(:), INTENT(in)            :: diag_guess
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_para_env_type), POINTER                    :: para_env
 
@@ -662,10 +684,11 @@ max_krylov_vects = max_krylov_vects_param
 
       nstates_total = SIZE(krylov_vectors, 1)
       nvects = SIZE(krylov_vectors, 2)
-      CPASSERT(nstates <= nvects .AND. nvects <= nstates_total)
 
+      CPASSERT(nstates <= nvects .AND. nvects <= nstates_total)
       CPASSERT(ALLOCATED(action_matrix%diag))
       CPASSERT(SIZE(action_matrix%diag) == nvects)
+      CPASSERT(SIZE(diag_guess) == nstates_total)
 
       NULLIFY(fm_struct, krylov_vectors_fm, A_v_fm, vT_A_v_fm)
       CALL cp_fm_struct_create(fm_struct, nrow_global=nstates_total, ncol_global=nvects, &
@@ -681,7 +704,7 @@ max_krylov_vects = max_krylov_vects_param
       CALL cp_fm_struct_release(fm_struct)
 
       CALL cp_fm_set_submatrix(krylov_vectors_fm, krylov_vectors)
-      CALL tddfpt_am_multiply(action_matrix=action_matrix, matrix_b=krylov_vectors_fm, matrix_c=A_v_fm)
+      CALL tddfpt_am_multiply(action_matrix=action_matrix, diag_guess=diag_guess, matrix_b=krylov_vectors_fm, matrix_c=A_v_fm)
 
       CALL cp_gemm('T', 'N', nvects, nvects, nstates_total, 1.0_dp, krylov_vectors_fm, A_v_fm, 0.0_dp, vT_A_v_fm)
 
@@ -708,8 +731,6 @@ max_krylov_vects = max_krylov_vects_param
       CALL cp_fm_release(ritz_vectors_fm)
 
       CALL tddfpt_orthonormalize_residual_vectors(krylov_vectors(:,1:nstates), krylov_vectors(:,1:0))
-!      CALL tddfpt_assemble_evects(evects=evects, krylov_vectors=ritz_vectors, trial_vectors=trial_vectors, mos_virt=mos_virt)
-
    END SUBROUTINE tddfpt_davidson_restart
 
    SUBROUTINE tddfpt_orthonormalize_residual_vectors(residual_vectors, krylov_vectors)
@@ -882,10 +903,9 @@ max_krylov_vects = max_krylov_vects_param
       CALL timestop(handle)
    END SUBROUTINE tddfpt_lumos
 
-   SUBROUTINE tddfpt_guess(guess_vectors, guess_evals, nstates, nstates_active, evals_occ, evals_virt, &
+   SUBROUTINE tddfpt_guess(guess_vectors, nstates, nstates_active, evals_occ, evals_virt, &
                            is_add_degenerate, degenerate_eps, log_unit)
-      TYPE(tddfpt_trial_vectors), INTENT(inout)          :: guess_vectors
-      REAL(kind=dp), ALLOCATABLE, DIMENSION(:), INTENT(inout) :: guess_evals
+      TYPE(tddfpt_guess_vectors), INTENT(inout)          :: guess_vectors
       INTEGER, INTENT(in)                                :: nstates
       INTEGER, INTENT(in)                                :: nstates_active
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals_occ
@@ -905,8 +925,7 @@ max_krylov_vects = max_krylov_vects_param
       CALL timeset(routineN, handle)
 
       CPASSERT(.NOT. ALLOCATED(guess_vectors%descrs))
-      CPASSERT(.NOT. ALLOCATED(guess_vectors%evects))
-      CPASSERT(.NOT. ALLOCATED(guess_evals))
+      CPASSERT(.NOT. ALLOCATED(guess_vectors%evals))
 
       nmo_occ_avail  = SIZE(evals_occ)
       nmo_virt_avail = SIZE(evals_virt)
@@ -1000,8 +1019,8 @@ max_krylov_vects = max_krylov_vects_param
          END IF
       END IF
 
-      ALLOCATE (guess_evals(nstates_total))
-      guess_evals(1:nstates_total) = e_virt_minus_occ(1:nstates_total)
+      ALLOCATE (guess_vectors%evals(nstates_total))
+      guess_vectors%evals(1:nstates_total) = e_virt_minus_occ(1:nstates_total)
       DEALLOCATE (e_virt_minus_occ)
 
       IF (log_unit > 0) &
@@ -1017,36 +1036,33 @@ max_krylov_vects = max_krylov_vects_param
       CALL timestop(handle)
    END SUBROUTINE tddfpt_guess
 
-   SUBROUTINE tddfpt_assemble_evects(evects, krylov_vectors, trial_vectors, mos_virt)
+   SUBROUTINE tddfpt_assemble_evects(evects, krylov_vectors, guess_vectors, mos_virt)
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
       REAL(kind=dp), DIMENSION(:,:), INTENT(in)          :: krylov_vectors
-      TYPE(tddfpt_trial_vectors), INTENT(in)             :: trial_vectors
+      TYPE(tddfpt_guess_vectors), INTENT(in)             :: guess_vectors
       TYPE(cp_fm_type), POINTER                          :: mos_virt
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_assemble_evects', &
          routineP = moduleN//':'//routineN
 
-      INTEGER :: handle, ivect, jvect, nvects_krylov, nvects_trial, nstates, nao, nmo_occ, nmo_virt
+      INTEGER :: handle, ivect, jvect, nvects_krylov, nstates, nao, nmo_occ, nmo_virt
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(cp_fm_p_type), DIMENSION(:), ALLOCATABLE :: mos_virt_combined, mos_virt_columns
-      TYPE(cp_fm_type), POINTER                     :: evect_descr
 
       CALL timeset(routineN, handle)
 
       nvects_krylov = SIZE(evects)
-      nstates = SIZE(trial_vectors%descrs)
+      nstates = SIZE(guess_vectors%descrs)
 
-      CPASSERT(nvects_krylov > 0 .AND. nstates > 0)
+!      CPASSERT(nvects_krylov > 0 .AND. nstates > 0)
       CPASSERT(SIZE(krylov_vectors, 1) == nstates)
       CPASSERT(SIZE(krylov_vectors, 2) == nvects_krylov)
 
-      NULLIFY (fm_struct, evect_descr)
-      CALL cp_fm_get_info(matrix=evects(1)%matrix, ncol_global=nmo_occ, &
-                          matrix_struct=fm_struct, context=blacs_env, para_env=para_env)
+!      NULLIFY (fm_struct, evect_descr)
+      CALL cp_fm_get_info(matrix=evects(1)%matrix, ncol_global=nmo_occ, context=blacs_env, para_env=para_env)
       CALL cp_fm_get_info(matrix=mos_virt, nrow_global=nao, ncol_global=nmo_virt)
-      CALL cp_fm_create(evect_descr, fm_struct)
 
       NULLIFY (fm_struct)
       CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=1, context=blacs_env, para_env=para_env)
@@ -1066,36 +1082,19 @@ max_krylov_vects = max_krylov_vects_param
 
       CALL cp_fm_struct_release(fm_struct)
 
-      IF (ALLOCATED(trial_vectors%evects)) THEN
-         nvects_trial = SIZE(trial_vectors%evects)
-      ELSE
-         nvects_trial = 0
-      END IF
-
-      DO ivect = 1,nvects_krylov
-         CALL cp_fm_set_all(evects(ivect)%matrix, 0.0_dp)
-
-         DO jvect = 1,nvects_trial
-            CALL cp_fm_scale_and_add(1.0_dp, evects(ivect)%matrix, krylov_vectors(jvect, ivect), &
-                                     trial_vectors%evects(jvect)%matrix)
-         END DO
-      END DO
-
       DO ivect = 1,nvects_krylov
          DO jvect = 1,nmo_occ
             CALL cp_fm_set_all(mos_virt_combined(jvect)%matrix, 0.0_dp)
          END DO
 
-         DO jvect = nvects_trial+1, nstates
-            CALL cp_fm_scale_and_add(1.0_dp, mos_virt_combined(trial_vectors%descrs(jvect)%imo_occ)%matrix, &
-                                     krylov_vectors(jvect, ivect), mos_virt_columns(trial_vectors%descrs(jvect)%imo_virt)%matrix)
+         DO jvect = 1, nstates
+            CALL cp_fm_scale_and_add(1.0_dp, mos_virt_combined(guess_vectors%descrs(jvect)%imo_occ)%matrix, &
+                                     krylov_vectors(jvect, ivect), mos_virt_columns(guess_vectors%descrs(jvect)%imo_virt)%matrix)
          END DO
 
          DO jvect = 1,nmo_occ
-            CALL cp_fm_to_fm(mos_virt_combined(jvect)%matrix, evect_descr, ncol=1, source_start=1, target_start=jvect)
+            CALL cp_fm_to_fm(mos_virt_combined(jvect)%matrix, evects(ivect)%matrix, ncol=1, source_start=1, target_start=jvect)
          END DO
-
-         CALL cp_fm_scale_and_add(1.0_dp, evects(ivect)%matrix, 1.0_dp, evect_descr)
       END DO
 
       DO ivect = SIZE(mos_virt_combined),1,-1
@@ -1108,7 +1107,6 @@ max_krylov_vects = max_krylov_vects_param
       END DO
       DEALLOCATE (mos_virt_columns)
 
-      CALL cp_fm_release(evect_descr)
       CALL timestop(handle)
    END SUBROUTINE tddfpt_assemble_evects
 
@@ -1168,14 +1166,15 @@ max_krylov_vects = max_krylov_vects_param
       CALL timestop(handle)
    END SUBROUTINE tddfpt_init_by_energy_diff
 
-   SUBROUTINE tddfpt_apply_coulomb(block_nn, block_gn, block_on, alpha, evects, mos_occ, trial_vectors, mos_virt, qs_env, matrix_s)
+   SUBROUTINE tddfpt_apply_coulomb(block_on, block_nn, block_gn, alpha, evects, mos_occ, guess_vectors, mos_virt, qs_env, matrix_s)
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_on
       REAL(kind=dp), DIMENSION(:,:), INTENT(inout)       :: block_nn
-      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_gn, block_on
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_gn
 !      TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
       REAL(kind=dp), INTENT(in)                          :: alpha
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
       TYPE(cp_fm_type), POINTER                          :: mos_occ
-      TYPE(tddfpt_trial_vectors), INTENT(in)             :: trial_vectors
+      TYPE(tddfpt_guess_vectors), INTENT(in)             :: guess_vectors
       TYPE(cp_fm_type), POINTER                          :: mos_virt
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
@@ -1217,7 +1216,8 @@ max_krylov_vects = max_krylov_vects_param
       IF (ALLOCATED(block_gn)) THEN
          nstates_total = nstates_total + SIZE(block_gn, 1)
       END IF
-      CPASSERT(nvects_exists == SIZE(evects))
+      CPASSERT(SIZE(evects) == nvects_exists)
+      CPASSERT(SIZE(guess_vectors%evals) == nstates_total)
 
       CALL cp_fm_get_info(mos_occ,  nrow_global=nao, ncol_global=nmo_occ)
       CALL cp_fm_get_info(mos_virt, ncol_global=nmo_virt)
@@ -1306,7 +1306,7 @@ max_krylov_vects = max_krylov_vects_param
 
             CALL cp_fm_trace(evects(jvect)%matrix, J_ia_jnu, J_ia_jb)
             block_nn(jkv, ikv) = block_nn(jkv, ikv) + alpha*J_ia_jb
-         END DO 
+         END DO
 
          IF (ALLOCATED(block_gn)) THEN
             DO jvect = 1,nmo_occ
@@ -1316,8 +1316,8 @@ max_krylov_vects = max_krylov_vects_param
             DO jvect = nvects_exists+1,nstates_total
                jkv = jvect - nvects_exists
 
-               CALL cp_fm_trace(mos_virt_columns(trial_vectors%descrs(jvect)%imo_virt)%matrix, &
-                    mos_occ_columns(trial_vectors%descrs(jvect)%imo_occ)%matrix, J_ia_jb)
+               CALL cp_fm_trace(mos_virt_columns(guess_vectors%descrs(jvect)%imo_virt)%matrix, &
+                    mos_occ_columns(guess_vectors%descrs(jvect)%imo_occ)%matrix, J_ia_jb)
                block_gn(jkv, ikv) = block_gn(jkv, ikv) + alpha*J_ia_jb
             END DO
          END IF
@@ -1349,14 +1349,15 @@ max_krylov_vects = max_krylov_vects_param
       CALL timestop(handle)
    END SUBROUTINE tddfpt_apply_coulomb
 
-   SUBROUTINE tddfpt_apply_kernel(block_nn, block_gn, block_on, alpha, evects, mos_occ, trial_vectors, mos_virt, &
+   SUBROUTINE tddfpt_apply_kernel(block_on, block_nn, block_gn, alpha, evects, mos_occ, guess_vectors, mos_virt, &
                                   xc_rho_set, xc_deriv_set, qs_env, matrix_s, xc_section)
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_on
       REAL(kind=dp), DIMENSION(:,:), INTENT(inout)       :: block_nn
-      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_gn, block_on
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_gn
       REAL(kind=dp), INTENT(in)                          :: alpha
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
       TYPE(cp_fm_type), POINTER                          :: mos_occ
-      TYPE(tddfpt_trial_vectors), INTENT(in)             :: trial_vectors
+      TYPE(tddfpt_guess_vectors), INTENT(in)             :: guess_vectors
       TYPE(cp_fm_type), POINTER                          :: mos_virt
       TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set
       TYPE(xc_derivative_set_type), POINTER              :: xc_deriv_set
@@ -1405,6 +1406,7 @@ max_krylov_vects = max_krylov_vects_param
          nstates_total = nstates_total + SIZE(block_gn, 1)
       END IF
       CPASSERT(nvects_exists == SIZE(evects))
+      CPASSERT(SIZE(guess_vectors%evals) == nstates_total)
 
       CALL cp_fm_get_info(mos_occ,  nrow_global=nao, ncol_global=nmo_occ)
       CALL cp_fm_get_info(mos_virt, ncol_global=nmo_virt)
@@ -1518,8 +1520,8 @@ max_krylov_vects = max_krylov_vects_param
             DO jvect = nvects_exists+1,nstates_total
                jkv = jvect - nvects_exists
 
-               CALL cp_fm_trace(mos_virt_columns(trial_vectors%descrs(jvect)%imo_virt)%matrix, &
-                    mos_occ_columns(trial_vectors%descrs(jvect)%imo_occ)%matrix, F_ia_jb)
+               CALL cp_fm_trace(mos_virt_columns(guess_vectors%descrs(jvect)%imo_virt)%matrix, &
+                    mos_occ_columns(guess_vectors%descrs(jvect)%imo_occ)%matrix, F_ia_jb)
                block_gn(jkv, ikv) = block_gn(jkv, ikv) + alpha*F_ia_jb
             END DO
          END IF
@@ -1740,23 +1742,20 @@ max_krylov_vects = max_krylov_vects_param
 
 
 ! action matrix related stuff
-   SUBROUTINE tddfpt_am_release(action_matrix, keep_guess)
+   SUBROUTINE tddfpt_am_release(action_matrix)
       TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
-      LOGICAL, INTENT(in) :: keep_guess
 
       IF (ASSOCIATED(action_matrix%lower_triangle)) &
          CALL cp_fm_release(action_matrix%lower_triangle)
 
       IF (ALLOCATED(action_matrix%diag)) &
          DEALLOCATE (action_matrix%diag)
-
-      IF (.NOT.keep_guess .AND. ALLOCATED(action_matrix%diag_guess)) &
-         DEALLOCATE (action_matrix%diag_guess)
-
    END SUBROUTINE tddfpt_am_release
 
-   FUNCTION tddfpt_am_expand(action_matrix, nvects_new, nvects_max, blacs_env, para_env) RESULT(added_vectors)
+   FUNCTION tddfpt_am_expand(action_matrix, nstates_total, nvects_new, nvects_max, &
+                             blacs_env, para_env) RESULT(added_vectors)
       TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
+      INTEGER, INTENT(in)                                :: nstates_total
       INTEGER, INTENT(in)                                :: nvects_new
       INTEGER, INTENT(in)                                :: nvects_max
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -1766,16 +1765,8 @@ max_krylov_vects = max_krylov_vects_param
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: diag_moved
       TYPE(cp_fm_type), POINTER                          :: tril_moved
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
-!      TYPE(cp_fm_type), POINTER                :: lower_triangle
-!      REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: diagonal, diagonal_guess
 
-      INTEGER :: nvects_exists, nstates_total, nvects_max_local
-
-!      CALL cp_fm_get_info(action_matrix%lower_triangle, nrow_global=nstates_total, ncol_global=nvects_exists)
-!      CPASSERT(SIZE(action_matrix%diag) == nvects_exists)
-!      CPASSERT(SIZE(action_matrix%diag_guess) == nstates_total)
-      CPASSERT(ALLOCATED(action_matrix%diag_guess))
-      nstates_total = SIZE(action_matrix%diag_guess) 
+      INTEGER :: nvects_exists, nvects_max_local
 
       IF (ALLOCATED(action_matrix%diag)) THEN
          nvects_exists = SIZE(action_matrix%diag)
@@ -1841,9 +1832,9 @@ max_krylov_vects = max_krylov_vects_param
    !  [NN] = new_krylov_vector x new_krylov_vector (upper triangular matrix)
    !  [GN] = guess_vector x new_krylov_vector
    !  1     first_vector
-   !  |-----|-----------| <- 1
-   !  |     | ON=       |
-   !  |     |NO^T       |
+   !  |-----|-----|-----| <- 1
+   !  |     | ON= |     |
+   !  |     |NO^T |     |
    !  |=====|=====|-----| <- first_vector
    !  | NO  | .NN |     |
    !  |     |   . |     |
@@ -1853,37 +1844,40 @@ max_krylov_vects = max_krylov_vects_param
    !  |     | GN  |     |
    !  |     |     |     |
    !  |-----|-----|-----|
-   SUBROUTINE tddfpt_am_update(action_matrix, first_vector, block_nn, block_gn, block_on)
+   SUBROUTINE tddfpt_am_update(action_matrix, block_on, block_nn, block_gn)
       TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
-      INTEGER, INTENT(in)                                :: first_vector
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(in) :: block_on
       REAL(kind=dp), DIMENSION(:,:), INTENT(inout)       :: block_nn
-      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(in) :: block_gn, block_on
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(in) :: block_gn
 
-      INTEGER :: nstates_total, nvects_exists, nvects_new, ivect, jvect
+      INTEGER :: nstates_total, first_vector, nvects_new, ivect, jvect
 
-      nstates_total = SIZE(action_matrix%diag_guess)
-      CPASSERT(ALLOCATED(action_matrix%diag))
-      nvects_exists = SIZE(action_matrix%diag)
 
       nvects_new = SIZE(block_nn, 1)
-      CPASSERT(SIZE(block_nn, 2) == nvects_new)
-      CPASSERT(first_vector+nvects_new-1 == nvects_exists)
-      IF (ALLOCATED(block_gn)) THEN
-         CPASSERT(SIZE(block_gn, 1) == nstates_total-first_vector-nvects_new+1)
-         CPASSERT(SIZE(block_gn, 2) == nvects_new)
-      END IF
 
+      first_vector = 1
       IF (ALLOCATED(block_on)) THEN
-         CPASSERT(first_vector > 1)
-         CPASSERT(SIZE(block_on, 1) == first_vector-1)
+         first_vector = first_vector + SIZE(block_on, 1)
          CPASSERT(SIZE(block_on, 2) == nvects_new)
       END IF
 
+      nstates_total = first_vector + nvects_new - 1
+      CPASSERT(ALLOCATED(action_matrix%diag))
+      ! SIZE(action_matrix%diag) == current number or Krylov's vectors
+      CPASSERT(SIZE(action_matrix%diag) == nstates_total)
+
+      IF (ALLOCATED(block_gn)) THEN
+         nstates_total = nstates_total + SIZE(block_gn)
+         CPASSERT(SIZE(block_gn, 2) == nvects_new)
+      END IF
+
+      ! update corresponding diagonal elements
       DO ivect = 1,nvects_new
          action_matrix%diag(first_vector+ivect-1) = block_nn(ivect, ivect)
       END DO
 
-      ! zeroise the lower diagonal triangle + all diagonal elements of the block_nn 
+      ! zeroise diagonal elements of the block_nn as well its lower triangle
+      ! (the lower triangle should already be zero, but do it anyway)
       DO jvect = 1,nvects_new
          DO ivect = jvect,nvects_new
             block_nn(ivect, jvect) = 0.0_dp
@@ -1894,21 +1888,22 @@ max_krylov_vects = max_krylov_vects_param
                                start_row=first_vector, start_col=first_vector, &
                                n_rows=nvects_new, n_cols=nvects_new, transpose=.TRUE.)
 
-      IF (ALLOCATED(block_gn)) &
-         CALL cp_fm_set_submatrix(action_matrix%lower_triangle, block_gn, &
-                                  start_row=first_vector+nvects_new, start_col=first_vector, &
-                                  n_rows=SIZE(block_gn, 1), n_cols=nvects_new, transpose=.FALSE.)
-
       IF (ALLOCATED(block_on)) &
          CALL cp_fm_set_submatrix(action_matrix%lower_triangle, block_on, &
                                   start_row=first_vector, start_col=1, &
                                   n_rows=nvects_new, n_cols=first_vector-1, transpose=.TRUE.)
+
+      IF (ALLOCATED(block_gn)) &
+         CALL cp_fm_set_submatrix(action_matrix%lower_triangle, block_gn, &
+                                  start_row=first_vector+nvects_new, start_col=first_vector, &
+                                  n_rows=SIZE(block_gn, 1), n_cols=nvects_new, transpose=.FALSE.)
    END SUBROUTINE tddfpt_am_update
 
   ! compute matrix product: C = A * B, where A is the compressed action matrix,
   ! B and C are set of krylov's vectors
-   SUBROUTINE tddfpt_am_multiply(action_matrix, matrix_b, matrix_c)
+   SUBROUTINE tddfpt_am_multiply(action_matrix, diag_guess, matrix_b, matrix_c)
       TYPE(tddfpt_action_matrix), INTENT(in)             :: action_matrix
+      REAL(kind=dp), DIMENSION(:), INTENT(in)            :: diag_guess
       TYPE(cp_fm_type), POINTER                          :: matrix_b, matrix_c
 
       INTEGER :: nvects_exists, nstates_total, offset, nstates
@@ -1921,7 +1916,7 @@ max_krylov_vects = max_krylov_vects_param
       NULLIFY(fm_struct, blacs_env, para_env)
       CALL cp_fm_get_info(matrix_b, ncol_global=nstates, matrix_struct=fm_struct, para_env=para_env, context=blacs_env)
 
-      nstates_total = SIZE(action_matrix%diag_guess)
+      nstates_total = SIZE(diag_guess)
       IF (ALLOCATED(action_matrix%diag)) THEN
          nvects_exists = SIZE(action_matrix%diag)
       ELSE
@@ -1931,7 +1926,7 @@ max_krylov_vects = max_krylov_vects_param
       ALLOCATE(a_diag(nstates_total, 1))
       IF (nvects_exists > 0) &
          a_diag(1:nvects_exists,1) = action_matrix%diag(1:nvects_exists)
-      a_diag(nvects_exists+1:nstates_total,1) = action_matrix%diag_guess(nvects_exists+1:nstates_total)
+      a_diag(nvects_exists+1:nstates_total,1) = diag_guess(nvects_exists+1:nstates_total)
 
       ! diag(action_matrix) * matrix_b : scale rows of the matrix_b by a_diag(:,1) .
       !
