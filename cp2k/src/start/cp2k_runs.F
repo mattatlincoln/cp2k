@@ -121,7 +121,7 @@ MODULE cp2k_runs
                                               pw_cuda_init
    USE qs_environment_types,            ONLY: get_qs_env
    USE qs_linres_module,                ONLY: linres_calculation
-   USE qs_tddfpt2_methods,              ONLY: tddfpt
+   USE qs_tddfpt4_methods,              ONLY: tddfpt
    USE qs_tddfpt_module,                ONLY: tddfpt_calculation
    USE reference_manager,               ONLY: print_all_references,&
                                               print_format_html
