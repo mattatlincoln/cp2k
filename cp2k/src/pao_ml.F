@@ -80,7 +80,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'pao_machine_learning_init', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, ikind
+      INTEGER                                            :: i
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(training_list_type), ALLOCATABLE, &
@@ -99,8 +99,8 @@ CONTAINS
 
       ! create training-set data-structure
       ALLOCATE (training_lists(SIZE(atomic_kind_set)))
-      DO ikind = 1, SIZE(training_lists)
-         CALL get_atomic_kind(atomic_kind_set(ikind), name=training_lists(ikind)%kindname)
+      DO i = 1, SIZE(training_lists)
+         CALL get_atomic_kind(atomic_kind_set(i), name=training_lists(i)%kindname)
       ENDDO
 
       ! parses training files, calculates descriptors and stores all training-points as linked lists
@@ -111,14 +111,8 @@ CONTAINS
       ! turns linked lists into matrices and syncs them across ranks
       CALL training_list2matrix(training_lists, training_matrices, para_env)
 
-      ! print some stats
-      IF (pao%iw > 0) THEN
-         DO ikind = 1, SIZE(training_matrices)
-            WRITE (pao%iw, *) "PAO|ML| Descriptor for kind: ", &
-               TRIM(training_matrices(ikind)%kindname), " has ", &
-               SIZE(training_matrices(ikind)%inputs, 2), " dimensions."
-         ENDDO
-      ENDIF
+      ! print some statistics about the training set
+      CALL pao_ml_print_stats(pao, training_matrices)
 
       ! use training-set to train model
       CALL pao_ml_train(pao, training_matrices)
@@ -206,37 +200,34 @@ CONTAINS
          my_particle_set(iatom)%r = positions(iatom, :)
       ENDDO
 
-      ! build linked list of training points
+      ! fill linked list with training points
       ! Afterwards all ranks will have lists with the same number of entries,
       ! however the input and output arrays will only be allocated on one rank per entry.
       ! We farm out the expensive calculation of the descriptor across ranks.
-      DO ikind = 1, nkinds
-         DO iatom = 1, natoms
-            IF (kindsmap(atom2kind(iatom)) == ikind) THEN
-               ALLOCATE (new_point)
+      DO iatom = 1, natoms
+         ALLOCATE (new_point)
 
-               ! training-point input, calculate descriptor only on one rank
-               IF (MOD(iatom-1, para_env%num_pe) == para_env%mepos) THEN
-                  CALL pao_ml_calc_descriptor(my_particle_set, &
-                                              qs_kind_set, &
-                                              cell, &
-                                              iatom=iatom, &
-                                              descriptor=new_point%input)
-               ENDIF
+         ! training-point input, calculate descriptor only on one rank
+         IF (MOD(iatom-1, para_env%num_pe) == para_env%mepos) THEN
+            CALL pao_ml_calc_descriptor(my_particle_set, &
+                                        qs_kind_set, &
+                                        cell, &
+                                        iatom=iatom, &
+                                        descriptor=new_point%input)
+         ENDIF
 
-               ! copy training-point output on first rank
-               IF (para_env%mepos == para_env%source) THEN
-                  nparams = SIZE(xblocks(iatom)%p, 1)
-                  ALLOCATE (new_point%output(nparams))
-                  new_point%output(:) = xblocks(iatom)%p(:, 1)
-               ENDIF
+         ! copy training-point output on first rank
+         IF (para_env%mepos == para_env%source) THEN
+            nparams = SIZE(xblocks(iatom)%p, 1)
+            ALLOCATE (new_point%output(nparams))
+            new_point%output(:) = xblocks(iatom)%p(:, 1)
+         ENDIF
 
-               ! add to linked list
-               training_lists(ikind)%npoints = training_lists(ikind)%npoints+1
-               new_point%next => training_lists(ikind)%head
-               training_lists(ikind)%head => new_point
-            ENDIF
-         ENDDO
+         ! add to linked list
+         ikind = kindsmap(atom2kind(iatom))
+         training_lists(ikind)%npoints = training_lists(ikind)%npoints+1
+         new_point%next => training_lists(ikind)%head
+         training_lists(ikind)%head => new_point
       ENDDO
 
       DEALLOCATE (cell, my_particle_set, hmat, kindsmap, positions, atom2kind)
@@ -278,6 +269,8 @@ CONTAINS
          ENDDO
       ENDDO
 
+      IF (ANY(kindsmap < 1)) &
+         CPABORT("PAO: Could not match all kinds from training set")
    END SUBROUTINE match_kinds
 
 ! **************************************************************************************************
@@ -356,6 +349,31 @@ CONTAINS
       ENDDO
 
    END SUBROUTINE training_list2matrix
+
+! **************************************************************************************************
+!> \brief Print some statistics about the training set
+!> \param pao ...
+!> \param training_matrices ...
+! **************************************************************************************************
+   SUBROUTINE pao_ml_print_stats(pao, training_matrices)
+      TYPE(pao_env_type), POINTER                        :: pao
+      TYPE(training_matrix_type), DIMENSION(:)           :: training_matrices
+
+      INTEGER                                            :: ikind, N
+
+      IF (pao%iw <= 0) RETURN
+
+      DO ikind = 1, SIZE(training_matrices)
+         N = SIZE(training_matrices(ikind)%inputs)
+         WRITE (pao%iw, "(A,I3,A,E10.1,1X,E10.1,1X,E10.1)") " PAO|ML| Descriptor for kind: "// &
+            TRIM(training_matrices(ikind)%kindname)//" size: ", &
+            SIZE(training_matrices(ikind)%inputs, 2), " min/mean/max: ", &
+            MINVAL(training_matrices(ikind)%inputs), &
+            SUM(training_matrices(ikind)%inputs)/REAL(N, dp), &
+            MAXVAL(training_matrices(ikind)%inputs)
+      ENDDO
+
+   END SUBROUTINE pao_ml_print_stats
 
 ! **************************************************************************************************
 !> \brief Calls the actuall learning algorthim to traing on the given matrices
