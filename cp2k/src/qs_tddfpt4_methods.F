@@ -26,7 +26,7 @@ MODULE qs_tddfpt4_methods
                                               cp_fm_schur_product,&
                                               cp_fm_symm,&
                                               cp_fm_trace,&
-                                              cp_fm_triangular_invert
+                                              cp_fm_triangular_invert, cp_fm_upper_to_full
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose
    USE cp_fm_diag,                      ONLY: choose_eigv_solver
    USE cp_fm_pool_types,                ONLY: cp_fm_pool_type,&
@@ -183,7 +183,7 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt', routineP = moduleN//':'//routineN
       INTEGER, PARAMETER                                 :: ispin = 1
-INTEGER, PARAMETER :: max_krylov_vects_param = 200
+INTEGER, PARAMETER :: max_krylov_vects_param = 2000
 
       CHARACTER(len=20)                                  :: navail_str, nstates_str
       INTEGER :: handle, nspins_save, log_unit, istate, nstates, nstates_total, nstates_converged, &
@@ -216,6 +216,10 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
       TYPE(qs_rho_type), POINTER                         :: rho_ij_struct
       TYPE(pw_p_type), DIMENSION(:), POINTER             :: rho_ij_r
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
+
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:,:)    :: K_ij_munu
+!      TYPE(tddfpt_K_ij_munu_storage)                     :: K_ij_munu
+INTEGER :: npoisson, ix, iy
 
       CALL timeset(routineN, handle)
       logger => cp_get_default_logger()
@@ -335,7 +339,8 @@ INTEGER, PARAMETER :: max_krylov_vects_param = 200
       evals_prev(1:nstates) = guess_vectors%evals(1:nstates)
 
 max_krylov_vects = max_krylov_vects_param
-      IF (max_krylov_vects > nstates_total) max_krylov_vects = nstates_total
+IF (max_krylov_vects < nstates) max_krylov_vects = nstates
+IF (max_krylov_vects > nstates_total) max_krylov_vects = nstates_total
 
       CALL cp_fm_get_info(mos_occ, matrix_struct=fm_struct)
       ALLOCATE(evects(max_krylov_vects))
@@ -351,6 +356,16 @@ max_krylov_vects = max_krylov_vects_param
       DO istate = 1,nstates
          krylov_vectors(istate, istate) = 1.0_dp
       END DO
+
+      ! hfx storage
+      IF (do_hfx) THEN
+         ALLOCATE(K_ij_munu(nmo_occ, nmo_occ))
+         DO iter = 1,nmo_occ
+            DO istate = 1,nmo_occ
+               NULLIFY (K_ij_munu(istate, iter)%matrix)
+            END DO
+         END DO
+      END IF
 
       ! start the wave-function optimization
       log_unit = cp_print_key_unit_nr(logger, tddfpt_section, "PRINT%ITERATION_INFO", extension=".tddfptLog")
@@ -397,6 +412,7 @@ max_krylov_vects = max_krylov_vects_param
          CALL tddfpt_am_compute(action_matrix=action_matrix, nvects_new=nvects_new, &
                                 evects=evects(1:nvects_exists), guess_vectors=guess_vectors, &
                                 mos_occ=mos_occ, evals_occ=evals_occ, mos_virt=mos_virt, &
+                                C_hf=C_hf, K_ij_munu=K_ij_munu, &
                                 qs_env=qs_env, matrix_ks=matrix_ks(1)%matrix, matrix_s=matrix_s(1)%matrix, &
                                 xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, xc_section=xc_section)
 
@@ -417,6 +433,16 @@ max_krylov_vects = max_krylov_vects_param
             END DO
             WRITE (energy_unit, *)
             CALL m_flush(energy_unit)
+
+ IF (do_hfx) THEN
+ npoisson = 0
+ DO ix = 1,nmo_occ
+    DO iy = 1,nmo_occ
+       IF (ASSOCIATED(K_ij_munu(iy, ix)%matrix)) npoisson = npoisson + 1
+    END DO
+ END DO
+ WRITE(energy_unit, '(1X,A,T70,I8,/)') "Total number of Poisson equations solved to compute (i j || mu nu)", npoisson
+ END IF
          END IF
 
          conv = MAXVAL(ABS(evals_last(1:nstates)-evals_prev(1:nstates)))
@@ -471,6 +497,16 @@ max_krylov_vects = max_krylov_vects_param
                                 mos_occ=mos_occ, evals_occ=evals_occ, mos_virt=mos_virt, evals_virt=evals_virt, &
                                 matrix_s=matrix_s, min_amplitude=tddfpt_control%min_excitation_amplitude)
 
+      IF (ALLOCATED(K_ij_munu)) THEN
+         DO iter = 1,nmo_occ
+            DO istate = 1,nmo_occ
+               IF (ASSOCIATED(K_ij_munu(istate, iter)%matrix)) &
+                  CALL cp_fm_release(K_ij_munu(istate, iter)%matrix)
+            END DO
+         END DO
+         DEALLOCATE(K_ij_munu)
+      END IF
+
       DEALLOCATE(krylov_vectors)
       DO istate = SIZE(evects),1,-1
           CALL cp_fm_release(evects(istate)%matrix)
@@ -498,7 +534,7 @@ max_krylov_vects = max_krylov_vects_param
    END SUBROUTINE tddfpt
 
    SUBROUTINE tddfpt_am_compute(action_matrix, nvects_new, evects, guess_vectors, mos_occ, evals_occ, mos_virt, &
-                               qs_env, matrix_ks, matrix_s, xc_rho_set, xc_deriv_set, xc_section)
+                               C_hf, K_ij_munu, qs_env, matrix_ks, matrix_s, xc_rho_set, xc_deriv_set, xc_section)
       TYPE(tddfpt_action_matrix), INTENT(inout)          :: action_matrix
       INTEGER, INTENT(in) :: nvects_new
       TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
@@ -507,6 +543,8 @@ max_krylov_vects = max_krylov_vects_param
       TYPE(cp_fm_type), POINTER                          :: mos_occ
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals_occ
       TYPE(cp_fm_type), POINTER                          :: mos_virt
+      REAL(kind=dp), INTENT(in)                          :: C_hf
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:,:), INTENT(inout) :: K_ij_munu
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(cp_dbcsr_type), POINTER                       :: matrix_ks, matrix_s
       TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set
@@ -556,6 +594,10 @@ max_krylov_vects = max_krylov_vects_param
                                evects=evects, mos_occ=mos_occ, guess_vectors=guess_vectors, &
                                mos_virt=mos_virt, xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                qs_env=qs_env, matrix_s=matrix_s, xc_section=xc_section)
+
+      IF (ALLOCATED(K_ij_munu)) &
+         CALL tddfpt_apply_hfx(block_on=block_on, block_nn=block_nn, K_ij_munu=K_ij_munu, alpha=C_hf, &
+                            evects=evects, mos_occ=mos_occ, qs_env=qs_env, matrix_s=matrix_s)
 
       CALL tddfpt_am_update(action_matrix=action_matrix, block_on=block_on, block_nn=block_nn, block_gn=block_gn)
 
@@ -1405,7 +1447,7 @@ max_krylov_vects = max_krylov_vects_param
       IF (ALLOCATED(block_gn)) THEN
          nstates_total = nstates_total + SIZE(block_gn, 1)
       END IF
-      CPASSERT(nvects_exists == SIZE(evects))
+      CPASSERT(SIZE(evects) == nvects_exists)
       CPASSERT(SIZE(guess_vectors%evals) == nstates_total)
 
       CALL cp_fm_get_info(mos_occ,  nrow_global=nao, ncol_global=nmo_occ)
@@ -1554,6 +1596,197 @@ max_krylov_vects = max_krylov_vects_param
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt_apply_kernel
+
+   SUBROUTINE tddfpt_apply_hfx(block_on, block_nn, K_ij_munu, alpha, evects, mos_occ, qs_env, matrix_s)
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE, INTENT(inout) :: block_on
+      REAL(kind=dp), DIMENSION(:,:), INTENT(inout)       :: block_nn
+      TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(inout)  :: K_ij_munu
+      REAL(kind=dp), INTENT(in)                          :: alpha
+      TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
+      TYPE(cp_fm_type), POINTER                          :: mos_occ
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_apply_hfx', &
+         routineP = moduleN//':'//routineN
+
+REAL(kind=dp), PARAMETER :: threshold = 1.0e-8_dp
+
+      INTEGER                                            :: handle, nkv_new, nvects_exists, ikv, jkv, &
+               ivect, jvect, nao, nmo_occ!, iocc, jocc
+!      REAL(kind=dp)                                      :: K_ij_ab
+      REAL(kind=dp), DIMENSION(:,:), ALLOCATABLE         :: weights_occ
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_fm_type), POINTER                          :: mo_coeff_a, mo_coeff_b, S_ivect, weights_occ_fm, work_fm
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+
+      TYPE(pw_p_type)                                    :: psi0_i, psi0_j, rho_g, v_gspace
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_dbcsr_p_type)                              :: hfx_munu
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+      TYPE(pw_env_type), POINTER                         :: pw_env
+      TYPE(pw_poisson_type), POINTER                     :: poisson_env
+      TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+!INTEGER :: ix
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (atomic_kind_set, blacs_env, cell, dft_control, para_env, particle_set, pw_env, qs_kind_set)
+      CALL get_qs_env(qs_env, atomic_kind_set=atomic_kind_set, blacs_env=blacs_env, &
+                      cell=cell, dft_control=dft_control, para_env=para_env, &
+                      particle_set=particle_set, pw_env=pw_env, qs_kind_set=qs_kind_set)
+
+      NULLIFY (auxbas_pw_pool, poisson_env)
+      CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, poisson_env=poisson_env)
+
+      NULLIFY (fm_struct, S_ivect)
+      CALL cp_fm_get_info(matrix=mos_occ, nrow_global=nao, ncol_global=nmo_occ, matrix_struct=fm_struct)
+
+      NULLIFY (psi0_i%pw, psi0_j%pw, v_gspace%pw, rho_g%pw, hfx_munu%matrix, work_fm)
+
+      nkv_new = SIZE(block_nn, 1)
+      nvects_exists = nkv_new
+      IF (ALLOCATED(block_on)) THEN
+         nvects_exists = nvects_exists + SIZE(block_on, 1)
+      END IF
+      CPASSERT(SIZE(evects) == nvects_exists)
+
+      CALL cp_fm_create(S_ivect, fm_struct)
+
+      NULLIFY (fm_struct, mo_coeff_a, mo_coeff_b, weights_occ_fm)
+      CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=1, para_env=para_env, context=blacs_env)
+      CALL cp_fm_create(mo_coeff_a, fm_struct)
+      CALL cp_fm_create(mo_coeff_b, fm_struct)
+      CALL cp_fm_struct_release(fm_struct)
+
+      CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_occ, ncol_global=nmo_occ, para_env=para_env, context=blacs_env)
+      CALL cp_fm_create(weights_occ_fm, fm_struct)
+      CALL cp_fm_struct_release(fm_struct)
+      ALLOCATE(weights_occ(nmo_occ, nmo_occ))
+
+      CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, para_env=para_env, context=blacs_env)
+
+      DO ikv = 1,nkv_new
+         ivect = nvects_exists - nkv_new + ikv
+
+         CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ivect)%matrix, S_ivect, ncol=nmo_occ, alpha=1.0_dp, beta=0.0_dp)
+
+         DO jkv = 1,ikv
+            jvect = nvects_exists - nkv_new + jkv
+            CALL cp_gemm('T', 'N', nmo_occ, nmo_occ, nao, 1.0_dp, evects(jvect)%matrix, S_ivect, 0.0_dp, weights_occ_fm)
+            CALL cp_fm_get_submatrix(weights_occ_fm, weights_occ)
+
+            block_nn(jkv, ikv) = block_nn(jkv, ikv) - alpha * tddfpt_compute_K_ij_ab(evects(ivect)%matrix, evects(jvect)%matrix)
+         END DO
+
+!         DO jvect = 1,nvects_exists-nkv_new
+!            CALL cp_gemm('T', 'N', nmo_occ, nmo_occ, nao, 1.0_dp, evects(jvect)%matrix, S_ivect, 0.0_dp, weights_occ_fm)
+!            CALL cp_fm_get_submatrix(weights_occ_fm, weights_occ)
+!
+!            block_on(jvect, ikv) = block_on(jvect, ikv) - &
+!                                   alpha * tddfpt_compute_K_ij_ab(evects(ivect)%matrix, evects(jvect)%matrix)
+!         END DO
+      END DO
+
+      IF (ASSOCIATED(work_fm)) THEN
+         CALL cp_fm_release(work_fm)
+      END IF
+      IF (ASSOCIATED(hfx_munu%matrix)) &
+         CALL cp_dbcsr_deallocate_matrix(hfx_munu%matrix)
+
+      IF (ASSOCIATED(rho_g%pw)) &
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, rho_g%pw)
+
+      IF (ASSOCIATED(v_gspace%pw)) &
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, v_gspace%pw)
+
+      IF (ASSOCIATED(psi0_j%pw)) &
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, psi0_j%pw)
+
+      IF (ASSOCIATED(psi0_i%pw)) &
+         CALL pw_pool_give_back_pw(auxbas_pw_pool, psi0_i%pw)
+
+      CALL cp_fm_struct_release(fm_struct)
+
+      DEALLOCATE(weights_occ)
+      CALL cp_fm_release(weights_occ_fm)
+      CALL cp_fm_release(mo_coeff_b)
+      CALL cp_fm_release(mo_coeff_a)
+      CALL cp_fm_release(S_ivect)
+
+      CALL timestop(handle)
+
+      CONTAINS
+
+      FUNCTION tddfpt_compute_K_ij_ab(evect_i, evect_j) RESULT(K_ij_ab)
+         TYPE(cp_fm_type), POINTER                          :: evect_i, evect_j
+         REAL(kind=dp) :: K_ij_ab
+
+         INTEGER :: iocc, jocc
+         REAL(kind=dp) :: pair_energy
+
+         K_ij_ab = 0.0_dp
+         DO iocc = 1,nmo_occ
+            DO jocc = 1,iocc
+               IF (ABS(weights_occ(jocc, iocc)) >= threshold .AND. .NOT. ASSOCIATED(K_ij_munu(jocc, iocc)%matrix)) THEN
+                  ! compute missed element ((i j || mu nu))
+
+                  IF (.NOT. ASSOCIATED(psi0_i%pw)) &
+                     CALL pw_pool_create_pw(auxbas_pw_pool, psi0_i%pw, use_data=REALDATA3D, in_space=REALSPACE)
+                  IF (.NOT. ASSOCIATED(psi0_j%pw)) &
+                     CALL pw_pool_create_pw(auxbas_pw_pool, psi0_j%pw, use_data=REALDATA3D, in_space=REALSPACE)
+                  IF (.NOT. ASSOCIATED(v_gspace%pw)) &
+                     CALL pw_pool_create_pw(auxbas_pw_pool, v_gspace%pw, use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+                  IF (.NOT. ASSOCIATED(rho_g%pw)) &
+                     CALL pw_pool_create_pw(auxbas_pw_pool, rho_g%pw, use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
+                  IF (.NOT. ASSOCIATED(hfx_munu%matrix)) THEN
+                     CALL cp_dbcsr_init_p(hfx_munu%matrix)
+                     CALL cp_dbcsr_copy(hfx_munu%matrix, matrix_s)
+                  END IF
+                  IF (.NOT. ASSOCIATED(work_fm)) THEN
+                     CALL cp_fm_create(work_fm, fm_struct)
+                  END IF
+                  CALL calculate_wavefunction(mos_occ, iocc, psi0_i, rho_g, atomic_kind_set, &
+                                qs_kind_set, cell, dft_control, particle_set, pw_env) ! TO DO: move 1 level top-ward
+
+                  CALL calculate_wavefunction(mos_occ, jocc, psi0_j, rho_g, atomic_kind_set, &
+                                   qs_kind_set, cell, dft_control, particle_set, pw_env)
+                  psi0_j%pw%cr3d = psi0_j%pw%cr3d*psi0_i%pw%cr3d
+
+                  CALL pw_transfer(psi0_j%pw, rho_g%pw)
+                  CALL pw_poisson_solve(poisson_env, rho_g%pw, pair_energy, v_gspace%pw)
+                  CALL pw_transfer(v_gspace%pw, psi0_j%pw)
+                  CALL pw_scale(psi0_j%pw, psi0_j%pw%pw_grid%dvol)
+
+                  CALL cp_dbcsr_set(hfx_munu%matrix, 0.0_dp)
+                  CALL integrate_v_rspace(v_rspace=psi0_j, hmat=hfx_munu, &
+                       qs_env=qs_env, calculate_forces=.FALSE., gapw=.FALSE.)
+
+                  CALL cp_fm_create(K_ij_munu(jocc, iocc)%matrix, fm_struct)
+                  CALL copy_dbcsr_to_fm(hfx_munu%matrix, K_ij_munu(jocc, iocc)%matrix)
+                  CALL cp_fm_upper_to_full(K_ij_munu(jocc, iocc)%matrix, work_fm)
+               END IF
+
+               IF (ASSOCIATED(K_ij_munu(jocc, iocc)%matrix)) THEN
+                  ! count existing element ((i j || mu nu))
+                  CALL cp_fm_to_fm(evect_i, mo_coeff_b, ncol=1, source_start=iocc, target_start=1)
+                  CALL cp_gemm('N', 'N', nao, 1, nao, 1.0_dp, K_ij_munu(jocc, iocc)%matrix, &
+                               mo_coeff_b, 0.0_dp, mo_coeff_a)
+                  CALL cp_fm_to_fm(evect_j, mo_coeff_b, ncol=1, source_start=jocc, target_start=1)
+                  CALL cp_fm_trace(mo_coeff_b, mo_coeff_a, pair_energy)
+
+                  K_ij_ab = K_ij_ab + pair_energy
+               END IF
+
+            END DO
+         END DO
+
+      END FUNCTION tddfpt_compute_K_ij_ab
+   END SUBROUTINE tddfpt_apply_hfx
 
 ! **************************************************************************************************
 !> \brief Print final TDDFPT excitation energies and analysis.
@@ -1863,7 +2096,7 @@ max_krylov_vects = max_krylov_vects_param
 
       nstates_total = first_vector + nvects_new - 1
       CPASSERT(ALLOCATED(action_matrix%diag))
-      ! SIZE(action_matrix%diag) == current number or Krylov's vectors
+      ! SIZE(action_matrix%diag) == current number of Krylov's vectors
       CPASSERT(SIZE(action_matrix%diag) == nstates_total)
 
       IF (ALLOCATED(block_gn)) THEN
@@ -1900,7 +2133,7 @@ max_krylov_vects = max_krylov_vects_param
    END SUBROUTINE tddfpt_am_update
 
   ! compute matrix product: C = A * B, where A is the compressed action matrix,
-  ! B and C are set of krylov's vectors
+  ! B and C are Krylov's vectors
    SUBROUTINE tddfpt_am_multiply(action_matrix, diag_guess, matrix_b, matrix_c)
       TYPE(tddfpt_action_matrix), INTENT(in)             :: action_matrix
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: diag_guess
