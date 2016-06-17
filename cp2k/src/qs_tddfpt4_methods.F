@@ -408,6 +408,8 @@ IF (max_krylov_vects > nstates_total) max_krylov_vects = nstates_total
          CALL tddfpt_assemble_evects(evects=evects(nvects_exists-nvects_new+1:nvects_exists), &
                                      krylov_vectors=krylov_vectors(:,nvects_exists-nvects_new+1:nvects_exists), &
                                      guess_vectors=guess_vectors, mos_virt=mos_virt)
+CALL print_densities(log_unit, nvects_exists-nvects_new+1, evects(nvects_exists-nvects_new+1:nvects_exists), &
+     mos_occ, qs_env, matrix_s(1)%matrix)
 
          CALL tddfpt_am_compute(action_matrix=action_matrix, nvects_new=nvects_new, &
                                 evects=evects(1:nvects_exists), guess_vectors=guess_vectors, &
@@ -779,24 +781,30 @@ IF (max_krylov_vects > nstates_total) max_krylov_vects = nstates_total
       REAL(kind=dp), DIMENSION(:,:), INTENT(inout) :: residual_vectors
       REAL(kind=dp), DIMENSION(:,:), INTENT(in)    :: krylov_vectors
 
-      INTEGER :: ikv, irv, nkv, nrv
+      INTEGER :: ikv, irv, nkv, nrv, nstates_total
       REAL(kind=dp) :: norm
 
+      REAL(kind=dp), EXTERNAL :: ddot, dnrm2
+
+      nstates_total = SIZE(krylov_vectors, 1)
       nkv = SIZE(krylov_vectors, 2)
       nrv = SIZE(residual_vectors, 2)
 
       DO irv = 1, nrv
          DO ikv = 1,nkv
-            norm = DOT_PRODUCT(residual_vectors(:,irv), krylov_vectors(:,ikv))
+!            norm = DOT_PRODUCT(residual_vectors(:,irv), krylov_vectors(:,ikv))
+            norm = ddot(nstates_total, residual_vectors(1:nstates_total,irv), 1, krylov_vectors(1:nstates_total,ikv), 1)
             residual_vectors(:,irv) = residual_vectors(:,irv) - norm * krylov_vectors(:,ikv)
          END DO
 
          DO ikv = 1,irv-1
-            norm = DOT_PRODUCT(residual_vectors(:,irv), residual_vectors(:,ikv))
+!            norm = DOT_PRODUCT(residual_vectors(:,irv), residual_vectors(:,ikv))
+            norm = ddot(nstates_total, residual_vectors(1:nstates_total,irv), 1, residual_vectors(1:nstates_total,ikv), 1)
             residual_vectors(:,irv) = residual_vectors(:,irv) - norm * residual_vectors(:,ikv)
          END DO
 
-         norm = 1.0_dp / sqrt(dot_product(residual_vectors(:,irv), residual_vectors(:,irv)))
+!         norm = 1.0_dp / SQRT(DOT_PRODUCT(residual_vectors(:,irv), residual_vectors(:,irv)))
+         norm = 1.0_dp / dnrm2(nstates_total, residual_vectors(1:nstates_total, irv), 1)
          residual_vectors(:,irv) = norm * residual_vectors(:,irv)
       END DO
    END SUBROUTINE tddfpt_orthonormalize_residual_vectors
@@ -2185,4 +2193,66 @@ REAL(kind=dp), PARAMETER :: threshold = 1.0e-8_dp
                       action_matrix%lower_triangle, matrix_b, 1.0_dp, matrix_c)
       END IF
    END SUBROUTINE tddfpt_am_multiply
+
+   SUBROUTINE print_densities(log_unit, first_vector, evects, mos_occ, qs_env, matrix_s)
+   USE kahan_sum,                       ONLY: accurate_sum
+   USE pw_methods,                      ONLY: pw_integrate_function
+      INTEGER, INTENT(in) :: log_unit, first_vector
+      TYPE(cp_fm_p_type), DIMENSION(:), INTENT(in)       :: evects
+      TYPE(cp_fm_type), POINTER                          :: mos_occ
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
+
+      INTEGER :: ivect, nvects, nao, nmo_occ
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(qs_rho_type), POINTER                         :: rho_ia_struct
+      TYPE(pw_p_type), DIMENSION(:), POINTER             :: rho_ia_r, rho_ia_g
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: rho_ia_ao
+      TYPE(cp_fm_type), POINTER                          :: rho_ia_fm
+
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: tot_rho_r
+      REAL(KIND=dp) :: total_rho_rspace, total_rho_gspace
+
+      nvects = SIZE(evects)
+      CALL cp_fm_get_info(mos_occ, nrow_global=nao, ncol_global=nmo_occ, context=blacs_env, para_env=para_env)
+
+      NULLIFY (fm_struct, rho_ia_fm)
+      CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, para_env=para_env, context=blacs_env)
+      CALL cp_fm_create(rho_ia_fm, fm_struct)
+      CALL cp_fm_struct_release(fm_struct)
+
+      NULLIFY (rho_ia_ao)
+      CALL cp_dbcsr_allocate_matrix_set(rho_ia_ao, 1)
+      CALL cp_dbcsr_init_p(rho_ia_ao(1)%matrix)
+      CALL cp_dbcsr_copy(rho_ia_ao(1)%matrix, matrix_s)
+
+      NULLIFY (rho_ia_struct, rho_ia_r, rho_ia_g)
+      CALL qs_rho_create(rho_ia_struct)
+      CALL qs_rho_set(rho_ia_struct, rho_ao=rho_ia_ao)
+      CALL qs_rho_rebuild(rho_ia_struct, qs_env, rebuild_ao=.FALSE., rebuild_grids=.TRUE.)
+      CALL qs_rho_get(rho_ia_struct, rho_r=rho_ia_r, rho_g=rho_ia_g, tot_rho_r=tot_rho_r)
+
+      IF (log_unit > 0) &
+         WRITE(log_unit, '(/,1X,A,T25,A,T50,A)') 'Vector no.', 'total_rho1_rspace', 'total_rho1_gspace'
+      DO ivect = 1,nvects
+         CALL cp_gemm('N', 'T', nao, nao, nmo_occ, 0.5_dp, evects(ivect)%matrix, mos_occ, 0.0_dp, rho_ia_fm)
+         CALL cp_gemm('N', 'T', nao, nao, nmo_occ, 0.5_dp, mos_occ, evects(ivect)%matrix, 1.0_dp, rho_ia_fm)
+
+         CALL copy_fm_to_dbcsr(rho_ia_fm, rho_ia_ao(1)%matrix, keep_sparsity=.TRUE.)
+         CALL qs_rho_update_rho(rho_ia_struct, qs_env)
+
+         total_rho_gspace = pw_integrate_function(rho_ia_g(1)%pw, isign=-1)
+         total_rho_rspace = accurate_sum(tot_rho_r)
+
+         IF (log_unit > 0) THEN
+            WRITE(log_unit, '(1X,I8,T25,ES20.10,T50,ES20.10)') ivect+first_vector-1, total_rho_rspace, total_rho_gspace
+         END IF
+      END DO
+
+      CALL qs_rho_release(rho_ia_struct)
+      CALL cp_fm_release(rho_ia_fm)
+
+   END SUBROUTINE print_densities
 END MODULE qs_tddfpt4_methods
