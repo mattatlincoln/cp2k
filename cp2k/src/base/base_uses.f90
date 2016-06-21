@@ -33,6 +33,10 @@
 #define CP_VERSION3(MAJOR, MINOR, UPDATE) (MAJOR * 10000 + MINOR * 100 + UPDATE)
 #define CP_VERSION4(MAJOR, MINOR, UPDATE, PATCH) (MAJOR * 100000000 + MINOR * 1000000 + UPDATE * 10000 + PATCH)
 
+! Concatenate two symbols.
+#define CP_CONCATENATE_AUX(A, B) A##B
+! Concatenate two symbols but expanding the arguments first.
+#define CP_CONCATENATE(A, B) CP_CONCATENATE_AUX(A, B)
 
 ! The CP_CONTIGUOUS macro may (or may not) expand to the CONTIGUOUS attribute
 ! depending on whether or not the compiler supports Fortran 2008.
@@ -45,16 +49,12 @@
 #endif
 ! Represents the comma eventually needed to attach the CONTIGUOUS attribute.
 ! Not used directly but eventually expanded by CP_COMMA(CP_CONTIGUOUS).
-#define CP_COMMA_CONTIGUOUS ,
-
-! Concatenate two symbols.
-#define CP_CONCATENATE_AUX(A, B) A##B
-! Concatenate two symbols but expanding the arguments first.
-#define CP_CONCATENATE(A, B) CP_CONCATENATE_AUX(A, B)
-
+#define CP_COMMA_ATTRIB_CONTIGUOUS ,
 ! Expands to a comma eventually needed when using ATTRIB depending on
 ! whether or not the ATTRIB is defined, otherwise expanded to nothing.
-#define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_, ATTRIB)
+#define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_, CP_CONCATENATE(ATTRIB_, ATTRIB))
+! Provided for convenience; eventually expands to COMMA+ATTRIBUTE.
+#define CP_COMMA_CONTIGUOUS CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS
 
 #if defined(__MKL)
 # define CP_MKL_PURE
