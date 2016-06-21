@@ -3171,11 +3171,9 @@
 ! *****************************************************************************
   SUBROUTINE mp_rget_cv(base,source,win,win_data,myproc,disp,request,&
        origin_datatype, target_datatype)
-    COMPLEX(kind=real_4), DIMENSION(:), POINTER &
-      CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS             :: base
+    COMPLEX(kind=real_4), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS  :: base
     INTEGER, INTENT(IN)                                 :: source, win
-    COMPLEX(kind=real_4), DIMENSION(:), POINTER &
-      CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS             :: win_data
+    COMPLEX(kind=real_4), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS  :: win_data
     INTEGER, INTENT(IN), OPTIONAL                       :: myproc, disp
     INTEGER, INTENT(OUT)                                :: request
     TYPE(mp_type_descriptor_type), INTENT(IN), OPTIONAL :: origin_datatype, target_datatype
