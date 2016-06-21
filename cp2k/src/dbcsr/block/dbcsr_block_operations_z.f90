@@ -365,9 +365,13 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-
+#if defined(__MKL)
+#   include "mkl_trans.fi"
+    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+#else
     extent_out(1:rows*columns) = RESHAPE(TRANSPOSE(&
          RESHAPE(extent_in(1:rows*columns), (/rows, columns/))), (/rows*columns/))
+#endif
   END SUBROUTINE block_transpose_copy_z
 
 ! **************************************************************************************************
@@ -451,8 +455,12 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-
+#if defined(__MKL)
+#   include "mkl_trans.fi"
+    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+#else
     extent_out = TRANSPOSE(RESHAPE(extent_in, (/rows, columns/)))
+#endif
   END SUBROUTINE block_transpose_copy_2d1d_z
 
 ! **************************************************************************************************
@@ -494,8 +502,12 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-
+#if defined(__MKL)
+#   include "mkl_trans.fi"
+    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+#else
     extent_out = RESHAPE(TRANSPOSE(extent_in), (/rows*columns/))
+#endif
   END SUBROUTINE block_transpose_copy_1d2d_z
 
 
