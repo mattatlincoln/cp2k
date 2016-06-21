@@ -23,7 +23,7 @@
     INTEGER(KIND=int_8), ALLOCATABLE, &
       DIMENSION(:)                           :: keys
     REAL(kind=real_8), DIMENSION(:), POINTER &
-      CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS  :: target_data
+      CP_COMMA_CONTIGUOUS                    :: target_data
     REAL(kind=real_8), DIMENSION(:, :), POINTER        :: block_2d
     TYPE(btree_2d_data_d), ALLOCATABLE, &
       DIMENSION(:)                           :: values
