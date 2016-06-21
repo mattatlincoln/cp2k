@@ -5,7 +5,7 @@
   'nametype1': 'd',
   'prec1': 'dp',
   'type1': 'REAL(kind=real_8)',
-  'zero1': '0.0_real_8'},
+  'zero1': '0.0_real_8',
   'one1': '1.0_real_8'},
  {'base1': 'r',
   'dkind1': 'dbcsr_type_real_4',

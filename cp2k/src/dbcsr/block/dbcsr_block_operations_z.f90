@@ -366,7 +366,7 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+    CALL mkl_zomatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_8), extent_in, rows, extent_out, rows)
 #else
     extent_out(1:rows*columns) = RESHAPE(TRANSPOSE(&
          RESHAPE(extent_in(1:rows*columns), (/rows, columns/))), (/rows*columns/))
@@ -455,7 +455,7 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+    CALL mkl_zomatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_8), extent_in, rows, extent_out, rows)
 #else
     extent_out = TRANSPOSE(RESHAPE(extent_in, (/rows, columns/)))
 #endif
@@ -501,7 +501,7 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-    CALL mkl_zomatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
+    CALL mkl_zomatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_8), extent_in, rows, extent_out, rows)
 #else
     extent_out = RESHAPE(TRANSPOSE(extent_in), (/rows*columns/))
 #endif
