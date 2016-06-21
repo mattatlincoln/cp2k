@@ -109,6 +109,10 @@ endif
 OPT1 = $(shell echo $$((1<$(OPT)?1:$(OPT))))
 OPT2 = $(shell echo $$((2<$(OPT)?2:$(OPT))))
 
+ifeq (0,$(ATTRIBS))
+  DFLAGS += -DCP_DISABLE_ATTRIBS
+endif
+
 ifeq (1,$(shell echo $$((2 > $(DBG)))))
   ifeq (1,$(AVX))
     TARGET = -xAVX

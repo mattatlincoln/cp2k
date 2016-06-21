@@ -40,9 +40,9 @@
 
 ! The CP_CONTIGUOUS macro may (or may not) expand to the CONTIGUOUS attribute
 ! depending on whether or not the compiler supports Fortran 2008.
-#if defined(__GFORTRAN__) && (CP_VERSION3(4, 6, 0) <= CP_VERSION3(__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__))
+#if !defined(CP_DISABLE_ATTRIBS) && defined(__GFORTRAN__) && (CP_VERSION3(4, 6, 0) <= CP_VERSION3(__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__))
 # define CP_CONTIGUOUS CONTIGUOUS
-#elif defined(__INTEL_COMPILER) && (1210 <= __INTEL_COMPILER)
+#elif !defined(CP_DISABLE_ATTRIBS) && defined(__INTEL_COMPILER) && (1210 <= __INTEL_COMPILER)
 # define CP_CONTIGUOUS CONTIGUOUS
 #else
 # define CP_CONTIGUOUS
