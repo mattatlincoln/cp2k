@@ -46,7 +46,7 @@
           IF (blk_p(blk) .NE. 0) THEN
              bp = ABS(blk_p(blk))
              bpe = bp + row_size * cbs(col_i(blk)) - 1
-             val = SQRT (REAL (SUM(ABS(DATA(bp:bpe))**2), KIND=sp))
+             val = SQRT (REAL (SUM(DATA(bp:bpe)**2), KIND=sp))
           ELSE
              val = 0.0_sp
           ENDIF
@@ -103,7 +103,7 @@
              col = blki(2,blk)
           ENDIF
           bpe = bp + rbs(row) * cbs(col) - 1
-          val = SQRT (REAL (SUM(ABS(DATA(bp:bpe))**2), KIND=sp))
+          val = SQRT (REAL (SUM(DATA(bp:bpe)**2), KIND=sp))
        ELSE
           val = 0.0_sp
        ENDIF
@@ -208,8 +208,8 @@
                          col_blk_size(local_col(col(blk))) - 1
                  ENDIF
                  max_norm = MAX(max_norm,&
-                      SQRT (REAL(SUM(ABS(data_p(bps(blk)+refs_displ(idata_displ,mi,ui):&
-                                                bpe+refs_displ(idata_displ,mi,ui)))**2), KIND=sp)))
+                      SQRT (REAL(SUM(data_p(bps(blk)+refs_displ(idata_displ,mi,ui):&
+                                                bpe+refs_displ(idata_displ,mi,ui))**2), KIND=sp)))
               ENDIF
            ENDDO
            !$omp end do
@@ -259,7 +259,7 @@ END SUBROUTINE calc_max_image_norms_c
      DO blk = 1, images%mats(ui)%m%nblks
         IF (bps(blk).NE.0) THEN
            bpe = bps(blk) + rbs(local_rows(row(blk))) * cbs(local_cols(col(blk))) - 1
-           norms(blk,ui) = SQRT (REAL (SUM(ABS(data(bps(blk):bpe))**2), KIND=sp))
+           norms(blk,ui) = SQRT (REAL (SUM(data(bps(blk):bpe)**2), KIND=sp))
         ELSE
            norms(blk,ui) = 0.0_sp
         ENDIF
