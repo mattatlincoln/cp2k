@@ -50,6 +50,7 @@
 ! Represents the comma eventually needed to attach the CONTIGUOUS attribute.
 ! Not used directly but eventually expanded by CP_COMMA(CP_CONTIGUOUS).
 #define CP_COMMA_ATTRIB_CONTIGUOUS ,
+#define CP_COMMA_ATTRIB_
 ! Expands to a comma eventually needed when using ATTRIB depending on
 ! whether or not the ATTRIB is defined, otherwise expanded to nothing.
 #define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_ATTRIB_, ATTRIB)
