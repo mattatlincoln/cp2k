@@ -431,7 +431,7 @@ endif
 
 ifneq (1,$(MKL))
   ifneq (0,$(MKL)) # smp
-    DFLAGS  += -D__MKL -D__FFTSG -D__FFTW3
+    DFLAGS  += -D__MKL -D__FFTW3
     IFLAGS  +=-I$(MKLROOT)/include -I$(MKLROOT)/include/fftw
     ifeq (0,$(MKL_STATIC))
       LIBS += -L$(MKLROOT)/lib/intel64
@@ -483,7 +483,7 @@ ifneq (1,$(MKL))
     LIBS += -Wl,--as-needed -lpthread -lm -Wl,--no-as-needed
   endif
 else # sequential
-  DFLAGS  += -D__MKL -D__FFTSG -D__FFTW3
+  DFLAGS  += -D__MKL -D__FFTW3
   IFLAGS  +=-I$(MKLROOT)/include -I$(MKLROOT)/include/fftw
   ifeq (0,$(MKL_STATIC))
     LIBS += -L$(MKLROOT)/lib/intel64
