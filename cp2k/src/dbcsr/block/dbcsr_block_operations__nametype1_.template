@@ -366,7 +366,6 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-#   include "mkl_trans.fi"
     CALL mkl_[nametype1]omatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
 #else
     extent_out(1:rows*columns) = RESHAPE(TRANSPOSE(&
@@ -456,7 +455,6 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-#   include "mkl_trans.fi"
     CALL mkl_[nametype1]omatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
 #else
     extent_out = TRANSPOSE(RESHAPE(extent_in, (/rows, columns/)))
@@ -503,7 +501,6 @@
 
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-#   include "mkl_trans.fi"
     CALL mkl_[nametype1]omatcopy('C', 'T', rows, columns, 1D0, extent_in, rows, extent_out, rows)
 #else
     extent_out = RESHAPE(TRANSPOSE(extent_in), (/rows*columns/))

@@ -37,6 +37,9 @@ MODULE dbcsr_block_operations
                                               real_8,&
                                               sp
 #include "../../base/base_uses.f90"
+#if defined(__MKL)
+#  include "mkl_trans.fi"
+#endif
 
 !$ USE OMP_LIB, ONLY: omp_get_max_threads, omp_get_thread_num, omp_get_num_threads
    IMPLICIT NONE
