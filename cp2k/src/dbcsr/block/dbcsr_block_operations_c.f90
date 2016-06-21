@@ -514,7 +514,7 @@
 !> \param[in] rows input matrix size
 !> \param[in] columns input matrix size
 ! **************************************************************************************************
-  PURE SUBROUTINE block_transpose_inplace_c(extent, rows, columns)
+  CP_MKL_PURE SUBROUTINE block_transpose_inplace_c(extent, rows, columns)
     INTEGER, INTENT(IN)                      :: rows, columns
     COMPLEX(kind=real_4), DIMENSION(rows*columns), &
       INTENT(INOUT)                          :: extent
@@ -525,7 +525,9 @@
 
     INTEGER :: r, c
 !   ---------------------------------------------------------------------------
-
+#if defined(__MKL)
+    CALL mkl_cimatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent, rows, rows)
+#else
     DO r = 1 , columns
       DO c = 1 , rows
        extent_tr(r + (c-1)*columns) = extent(c + (r-1)*rows)
@@ -536,6 +538,7 @@
        extent(r + (c-1)*columns) = extent_tr(r + (c-1)*columns)
       END DO
     END DO
+#endif
   END SUBROUTINE block_transpose_inplace_c
 
 
