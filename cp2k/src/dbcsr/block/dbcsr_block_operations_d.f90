@@ -355,7 +355,7 @@
 !> \param[in] rows input matrix size
 !> \param[in] columns input matrix size
 ! **************************************************************************************************
-  PURE SUBROUTINE block_transpose_copy_d(extent_out, extent_in,&
+  CP_MKL_PURE SUBROUTINE block_transpose_copy_d(extent_out, extent_in,&
        rows, columns)
     REAL(kind=real_8), DIMENSION(:), INTENT(OUT) :: extent_out
     REAL(kind=real_8), DIMENSION(:), INTENT(IN)  :: extent_in
@@ -444,7 +444,7 @@
 !> \param[in] rows input matrix size
 !> \param[in] columns input matrix size
 ! **************************************************************************************************
-  PURE SUBROUTINE block_transpose_copy_2d1d_d(extent_out, extent_in,&
+  CP_MKL_PURE SUBROUTINE block_transpose_copy_2d1d_d(extent_out, extent_in,&
        rows, columns)
     INTEGER, INTENT(IN)                           :: rows, columns
     REAL(kind=real_8), DIMENSION(columns,rows), INTENT(OUT) :: extent_out
@@ -490,7 +490,7 @@
 !> \param[in] rows input matrix size
 !> \param[in] columns input matrix size
 ! **************************************************************************************************
-  PURE SUBROUTINE block_transpose_copy_1d2d_d(extent_out, extent_in,&
+  CP_MKL_PURE SUBROUTINE block_transpose_copy_1d2d_d(extent_out, extent_in,&
        rows, columns)
     REAL(kind=real_8), DIMENSION(:), INTENT(OUT)            :: extent_out
     INTEGER, INTENT(IN)                           :: rows, columns

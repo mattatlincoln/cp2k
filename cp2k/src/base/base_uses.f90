@@ -56,3 +56,9 @@
 ! whether or not the ATTRIB is defined, otherwise expanded to nothing.
 #define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_, ATTRIB)
 
+#if defined(__MKL)
+# define CP_MKL_PURE
+#else
+# define CP_MKL_PURE PURE
+#endif
+
