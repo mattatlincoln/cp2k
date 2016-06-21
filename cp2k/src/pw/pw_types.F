@@ -40,9 +40,9 @@ MODULE pw_types
 
 ! **************************************************************************************************
    TYPE pw_type
-      REAL(KIND=dp), DIMENSION(:), POINTER CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS :: cr
+      REAL(KIND=dp), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS :: cr
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER :: cr3d
-      COMPLEX(KIND=dp), DIMENSION(:), POINTER CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS :: cc
+      COMPLEX(KIND=dp), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS :: cc
       COMPLEX(KIND=dp), DIMENSION(:, :, :), POINTER :: cc3d
 
       INTEGER :: in_use ! Which data is used [r1d/c1d/r3d/c3d]
