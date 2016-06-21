@@ -7099,7 +7099,7 @@ CONTAINS
 
       INTEGER                                            :: data_type, handle, nblks, nrows
       INTEGER, DIMENSION(1), TARGET                      :: tmp
-      INTEGER, DIMENSION(:), POINTER                     :: local_cols, local_rows
+      INTEGER, DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS :: local_cols, local_rows
 
 !   ---------------------------------------------------------------------------
 
