@@ -33,10 +33,10 @@
 #define CP_VERSION3(MAJOR, MINOR, UPDATE) (MAJOR * 10000 + MINOR * 100 + UPDATE)
 #define CP_VERSION4(MAJOR, MINOR, UPDATE, PATCH) (MAJOR * 100000000 + MINOR * 1000000 + UPDATE * 10000 + PATCH)
 
-! Concatenate two symbols.
+! Evaluate the given symbol.
 #define CP_EVAL(A) A
 ! Concatenate two symbols but expanding the arguments first.
-#define CP_CONCATENATE(A, B) CP_EVAL(A) ## CP_EVAL(B)
+#define CP_CONCATENATE(A, B) CP_EVAL(CP_EVAL(A) ## CP_EVAL(B))
 
 ! The CP_CONTIGUOUS macro may (or may not) expand to the CONTIGUOUS attribute
 ! depending on whether or not the compiler supports Fortran 2008.
@@ -53,7 +53,7 @@
 #define CP_COMMA_ATTRIB_
 ! Expands to a comma eventually needed when using ATTRIB depending on
 ! whether or not the ATTRIB is defined, otherwise expanded to nothing.
-#define CP_COMMA(ATTRIB) CP_EVAL(CP_CONCATENATE(CP_COMMA_ATTRIB, CP_CONCATENATE(_, ATTRIB)))
+#define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_ATTRIB, CP_CONCATENATE(_, ATTRIB))
 ! Provided for convenience; eventually expands to COMMA (,) and CONTIGUOUS.
 #define CP_COMMA_CONTIGUOUS CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS
 
