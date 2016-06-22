@@ -53,7 +53,7 @@
 #define CP_COMMA_ATTRIB_
 ! Expands to a comma eventually needed when using ATTRIB depending on
 ! whether or not the ATTRIB is defined, otherwise expanded to nothing.
-#define CP_COMMA(ATTRIB) CP_CONCATENATE(CP_COMMA_ATTRIB, CP_CONCATENATE(_, ATTRIB))
+#define CP_COMMA(ATTRIB) CP_EVAL(CP_CONCATENATE(CP_COMMA_ATTRIB, CP_CONCATENATE(_, ATTRIB)))
 ! Provided for convenience; eventually expands to COMMA (,) and CONTIGUOUS.
 #define CP_COMMA_CONTIGUOUS CP_COMMA(CP_CONTIGUOUS) CP_CONTIGUOUS
 
