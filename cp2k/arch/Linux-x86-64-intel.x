@@ -196,14 +196,20 @@ ifneq (0,$(MPI))
   DFLAGS += -D__parallel
   ifneq (0,$(SCALAPACK))
     DFLAGS += -D__BLACS -D__SCALAPACK
-    ifneq (1,$(SCALAPACK))
-      DFLAGS += -D__SCALAPACK$(SCALAPACK)
-    endif
-    ifeq (1,$(SCALAPACK))
-      SCALAPACKDIR = $(MKLROOT)/lib/intel64
-      SCALAPACKLIB = mkl_scalapack_lp64
-    else
-      SCALAPACKDIR = $(HOME)/scalapack-2.0.2
+    ifeq (0,$(shell echo $(SCALAPACK) | grep -q "^-*[0-9]\+$$"; echo $$?)) # number
+      ifneq (-1,$(SCALAPACK))
+        ifneq (1,$(SCALAPACK))
+          DFLAGS += -D__SCALAPACK$(SCALAPACK)
+        endif
+        SCALAPACKDIR = $(MKLROOT)/lib/intel64
+        SCALAPACKLIB = mkl_scalapack_lp64
+      else
+        SCALAPACKDIR = $(HOME)/scalapack-2.0.2
+        SCALAPACKLIB = scalapack
+        LIBS += -L$(SCALAPACKDIR)
+      endif
+    else # NaN
+      SCALAPACKDIR = $(SCALAPACK)
       SCALAPACKLIB = scalapack
       LIBS += -L$(SCALAPACKDIR)
     endif
