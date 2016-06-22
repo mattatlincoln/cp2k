@@ -164,8 +164,8 @@ CONTAINS
       INTEGER(KIND=int_8), INTENT(INOUT)                 :: flop
       INTEGER, DIMENSION(1:3, 1:af), INTENT(IN)          :: a_index
       INTEGER, DIMENSION(1:3, 1:bf), INTENT(IN)          :: b_index
-      REAL(KIND=sp), DIMENSION(:), POINTER               :: a_norms, b_norms
-
+      REAL(KIND=sp), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS &
+                                                         :: a_norms, b_norms
       INTEGER                                            :: ithread, max_new_nblks, nblks_new
 
       ithread = 0
@@ -302,7 +302,8 @@ CONTAINS
       TYPE(hash_table_type), DIMENSION(:), INTENT(INOUT) :: c_hashes
       INTEGER, DIMENSION(1:3, 1:af), INTENT(IN)          :: a_index
       INTEGER, DIMENSION(1:3, 1:bf), INTENT(IN)          :: b_index
-      REAL(KIND=sp), DIMENSION(:), POINTER               :: a_norms, b_norms
+      REAL(KIND=sp), DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS &
+                                                         :: a_norms, b_norms
 
       CHARACTER(len=*), PARAMETER :: routineN = 'dbcsr_mm_csr_multiply_low', &
          routineP = moduleN//':'//routineN
@@ -464,7 +465,7 @@ CONTAINS
       TYPE(dbcsr_mm_csr_type), INTENT(INOUT)             :: this
       TYPE(dbcsr_type), INTENT(IN), OPTIONAL             :: left, right
       TYPE(dbcsr_type), INTENT(INOUT)                    :: product
-      INTEGER, DIMENSION(:), POINTER                     :: m_sizes, n_sizes
+      INTEGER, DIMENSION(:), POINTER CP_COMMA_CONTIGUOUS :: m_sizes, n_sizes
       INTEGER, INTENT(IN)                                :: block_estimate
       INTEGER, DIMENSION(:), INTENT(IN)                  :: right_row_blk_size
 
