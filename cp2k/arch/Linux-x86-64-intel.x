@@ -201,11 +201,16 @@ ifneq (0,$(MPI))
         ifneq (1,$(SCALAPACK))
           DFLAGS += -D__SCALAPACK$(SCALAPACK)
         endif
+      else
+        SCALAPACKDIR = $(HOME)/scalapack-2.0.2
+      endif
+      ifeq (,$(SCALAPACKDIR))
         SCALAPACKDIR = $(MKLROOT)/lib/intel64
         SCALAPACKLIB = mkl_scalapack_lp64
       else
-        SCALAPACKDIR = $(HOME)/scalapack-2.0.2
-        SCALAPACKLIB = scalapack
+        ifeq (,$(SCALAPACKLIB))
+          SCALAPACKLIB = scalapack
+        endif
         LIBS += -L$(SCALAPACKDIR)
       endif
     else # NaN
