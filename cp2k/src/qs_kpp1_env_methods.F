@@ -356,6 +356,7 @@ CONTAINS
        CALL cp_dbcsr_set(kpp1_env%v_ao(ispin)%matrix,0.0_dp)
        CALL cp_dbcsr_set(kpp1_env%v_hfx(ispin)%matrix,0.0_dp)
     END DO
+
     CALL tddft_hfx_matrix(qs_env,rho1, kpp1_env)
 
     CALL  xc_calc_2nd_deriv(v_xc, kpp1_env%deriv_set, kpp1_env%rho_set, &
@@ -478,7 +479,7 @@ CONTAINS
        !CALL cp_dbcsr_print(kpp1_env%v_hfx(ispin)%matrix)
        !CALL cp_dbcsr_print(k_p_p1(ispin)%matrix)
        CALL cp_dbcsr_add(k_p_p1(ispin)%matrix,kpp1_env%v_hfx(ispin)%matrix,&
-            alpha_scalar=1.0_dp,beta_scalar=1.0_dp)
+            alpha_scalar=1.0_dp,beta_scalar=4.0_dp)
        !CALL cp_dbcsr_print(k_p_p1(ispin)%matrix)
     END DO
 
@@ -840,17 +841,17 @@ CONTAINS
             total_rho_gspace
     END IF
 
-    CALL get_qs_env(qs_env=qs_env,&
-         subsys=subsys)
-    CALL qs_subsys_get(subsys,particles=particles)
-    
-    stride(:) =1
-
-    CALL qs_rho_get(rho1, rho_r=rho1_r)
-
-    WRITE(title,*) "Transition density"
-    CALL cp_pw_to_cube(rho1_r(1)%pw,2000,title,particles=particles,&
-         stride=stride)
+!!$    CALL get_qs_env(qs_env=qs_env,&
+!!$         subsys=subsys)
+!!$    CALL qs_subsys_get(subsys,particles=particles)
+!!$    
+!!$    stride(:) =1
+!!$
+!!$    CALL qs_rho_get(rho1, rho_r=rho1_r)
+!!$
+!!$    WRITE(title,*) "Transition density"
+!!$    CALL cp_pw_to_cube(rho1_r(1)%pw,2000,title,particles=particles,&
+!!$         stride=stride)
 
   END SUBROUTINE print_densities
 

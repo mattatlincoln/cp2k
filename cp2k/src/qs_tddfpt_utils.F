@@ -430,8 +430,11 @@ CONTAINS
                 END IF
              END DO
           END DO searchloop
-          WRITE (output_unit,'(14X,A,5X,F8.3,5X,F8.3,5X,F8.3)') &
-             "total oscillator strength", osx, osy,osz
+
+          IF (output_unit>0) THEN
+             WRITE (output_unit,'(14X,A,5X,F8.3,5X,F8.3,5X,F8.3)') &
+                  "total oscillator strength", osx, osy,osz
+          END IF
        END DO
        IF (output_unit>0) WRITE (output_unit,*)
     END DO
