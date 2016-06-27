@@ -1,9 +1,9 @@
-!-----------------------------------------------------------------------------!
-!   CP2K: A general program to perform molecular dynamics simulations         !
-!   Copyright (C) 2000 - 2016  CP2K developers group                          !
-!-----------------------------------------------------------------------------!
+!--------------------------------------------------------------------------------------------------!
+!   CP2K: A general program to perform molecular dynamics simulations                              !
+!   Copyright (C) 2000 - 2016  CP2K developers group                                               !
+!--------------------------------------------------------------------------------------------------!
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief  Collection of utilities for setting-up and handle velocities in MD
 !>         runs
 !> \author CJM
@@ -11,74 +11,80 @@
 !>         reorganization of the original routines/modules
 !>      Teodoro Laino [tlaino] 12.2008 - Preparing for VIRTUAL SITE constraints
 !>                                       (patch by Marcel Baer)
-! *****************************************************************************
+! **************************************************************************************************
 MODULE md_vel_utils
-  USE atomic_kind_list_types,          ONLY: atomic_kind_list_type
-  USE atomic_kind_types,               ONLY: atomic_kind_type,&
-                                             get_atomic_kind,&
-                                             get_atomic_kind_set
-  USE cell_types,                      ONLY: &
-       cell_type, use_perd_none, use_perd_x, use_perd_xy, use_perd_xyz, &
-       use_perd_xz, use_perd_y, use_perd_yz, use_perd_z
-  USE cp_linked_list_val,              ONLY: cp_sll_val_next,&
-                                             cp_sll_val_type
-  USE cp_log_handling,                 ONLY: cp_get_default_logger,&
-                                             cp_logger_type
-  USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
-                                             cp_print_key_unit_nr
-  USE cp_para_types,                   ONLY: cp_para_env_type
-  USE cp_subsys_types,                 ONLY: cp_subsys_get,&
-                                             cp_subsys_type
-  USE cp_units,                        ONLY: cp_unit_from_cp2k
-  USE extended_system_types,           ONLY: npt_info_type
-  USE force_env_methods,               ONLY: force_env_calc_energy_force
-  USE force_env_types,                 ONLY: force_env_get,&
-                                             force_env_type
-  USE force_env_utils,                 ONLY: force_env_rattle,&
-                                             force_env_shake
-  USE global_types,                    ONLY: global_environment_type
-  USE input_constants,                 ONLY: npe_f_ensemble,&
-                                             npe_i_ensemble,&
-                                             nph_uniaxial_damped_ensemble,&
-                                             nph_uniaxial_ensemble,&
-                                             npt_f_ensemble,&
-                                             npt_i_ensemble,&
-                                             reftraj_ensemble
-  USE input_cp2k_binary_restarts,      ONLY: read_binary_velocities
-  USE input_restart_force_eval,        ONLY: update_subsys
-  USE input_section_types,             ONLY: section_vals_get,&
-                                             section_vals_get_subs_vals,&
-                                             section_vals_list_get,&
-                                             section_vals_type,&
-                                             section_vals_val_get
-  USE input_val_types,                 ONLY: val_get,&
-                                             val_type
-  USE kinds,                           ONLY: default_string_length,&
-                                             dp
-  USE mathlib,                         ONLY: diamat_all
-  USE md_ener_types,                   ONLY: md_ener_type
-  USE md_environment_types,            ONLY: get_md_env,&
-                                             md_environment_type
-  USE mol_kind_new_list_types,         ONLY: mol_kind_new_list_type
-  USE molecule_kind_types,             ONLY: fixd_constraint_type,&
-                                             get_molecule_kind,&
-                                             get_molecule_kind_set,&
-                                             molecule_kind_type
-  USE parallel_rng_types,              ONLY: next_random_number
-  USE particle_list_types,             ONLY: particle_list_type
-  USE particle_types,                  ONLY: particle_type
-  USE physcon,                         ONLY: kelvin
-  USE shell_opt,                       ONLY: optimize_shell_core
-  USE shell_potential_types,           ONLY: shell_kind_type
-  USE simpar_types,                    ONLY: simpar_type
-  USE thermal_region_types,            ONLY: thermal_region_type,&
-                                             thermal_regions_type
+   USE atomic_kind_list_types,          ONLY: atomic_kind_list_type
+   USE atomic_kind_types,               ONLY: atomic_kind_type,&
+                                              get_atomic_kind,&
+                                              get_atomic_kind_set
+   USE bibliography,                    ONLY: West2006,&
+                                              cite_reference
+   USE cell_types,                      ONLY: &
+        cell_type, use_perd_none, use_perd_x, use_perd_xy, use_perd_xyz, use_perd_xz, use_perd_y, &
+        use_perd_yz, use_perd_z
+   USE cp_linked_list_val,              ONLY: cp_sll_val_next,&
+                                              cp_sll_val_type
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_type
+   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
+                                              cp_print_key_unit_nr
+   USE cp_para_types,                   ONLY: cp_para_env_type
+   USE cp_subsys_types,                 ONLY: cp_subsys_get,&
+                                              cp_subsys_type
+   USE cp_units,                        ONLY: cp_unit_from_cp2k
+   USE extended_system_types,           ONLY: npt_info_type
+   USE force_env_methods,               ONLY: force_env_calc_energy_force
+   USE force_env_types,                 ONLY: force_env_get,&
+                                              force_env_type
+   USE force_env_utils,                 ONLY: force_env_rattle,&
+                                              force_env_shake
+   USE global_types,                    ONLY: global_environment_type
+   USE input_constants,                 ONLY: &
+        md_init_default, md_init_vib, npe_f_ensemble, npe_i_ensemble, &
+        nph_uniaxial_damped_ensemble, nph_uniaxial_ensemble, npt_f_ensemble, npt_i_ensemble, &
+        reftraj_ensemble
+   USE input_cp2k_binary_restarts,      ONLY: read_binary_velocities
+   USE input_restart_force_eval,        ONLY: update_subsys
+   USE input_section_types,             ONLY: section_vals_get,&
+                                              section_vals_get_subs_vals,&
+                                              section_vals_list_get,&
+                                              section_vals_type,&
+                                              section_vals_val_get
+   USE input_val_types,                 ONLY: val_get,&
+                                              val_type
+   USE kinds,                           ONLY: default_string_length,&
+                                              dp
+   USE mathconstants,                   ONLY: pi
+   USE mathlib,                         ONLY: diamat_all
+   USE md_ener_types,                   ONLY: md_ener_type
+   USE md_environment_types,            ONLY: get_md_env,&
+                                              md_environment_type
+   USE md_util,                         ONLY: read_vib_eigs_unformatted
+   USE mol_kind_new_list_types,         ONLY: mol_kind_new_list_type
+   USE molecule_kind_types,             ONLY: fixd_constraint_type,&
+                                              get_molecule_kind,&
+                                              get_molecule_kind_set,&
+                                              molecule_kind_type
+   USE parallel_rng_types,              ONLY: UNIFORM,&
+                                              create_rng_stream,&
+                                              delete_rng_stream,&
+                                              next_random_number,&
+                                              random_numbers,&
+                                              rng_stream_type
+   USE particle_list_types,             ONLY: particle_list_type
+   USE particle_types,                  ONLY: particle_type
+   USE physcon,                         ONLY: kelvin
+   USE shell_opt,                       ONLY: optimize_shell_core
+   USE shell_potential_types,           ONLY: shell_kind_type
+   USE simpar_types,                    ONLY: simpar_type
+   USE thermal_region_types,            ONLY: thermal_region_type,&
+                                              thermal_regions_type
 #include "../base/base_uses.f90"
 
   IMPLICIT NONE
 
   PRIVATE
-  CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'md_vel_utils'
+   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'md_vel_utils'
 
 
   PUBLIC :: temperature_control,&
@@ -88,7 +94,7 @@ MODULE md_vel_utils
 
 CONTAINS
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief compute center of mass position
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -97,19 +103,17 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE compute_rcom(part,is_fixed,rcom)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, DIMENSION(:), INTENT(IN)        :: is_fixed
-    REAL(KIND=dp), DIMENSION(3), INTENT(OUT) :: rcom
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
+      REAL(KIND=dp), DIMENSION(3), INTENT(OUT)           :: rcom
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'compute_rcom', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'compute_rcom', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    REAL(KIND=dp)                            :: denom, mass
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i
+      REAL(KIND=dp)                                      :: denom, mass
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     rcom(:)  = 0.0_dp
     denom = 0.0_dp
@@ -128,7 +132,7 @@ CONTAINS
 
   END SUBROUTINE compute_rcom
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief compute center of mass velocity
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -138,20 +142,18 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE compute_vcom(part,is_fixed,vcom,ecom)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, DIMENSION(:), INTENT(IN)        :: is_fixed
-    REAL(KIND=dp), DIMENSION(3), INTENT(OUT) :: vcom
-    REAL(KIND=dp), INTENT(OUT), OPTIONAL     :: ecom
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
+      REAL(KIND=dp), DIMENSION(3), INTENT(OUT)           :: vcom
+      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: ecom
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'compute_vcom', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'compute_vcom', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    REAL(KIND=dp)                            :: denom, mass
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i
+      REAL(KIND=dp)                                      :: denom, mass
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     vcom  = 0.0_dp
     denom = 0.0_dp
@@ -175,7 +177,7 @@ CONTAINS
 
   END SUBROUTINE compute_vcom
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Copy atom velocities into core and shell velocities
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -184,17 +186,16 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE clone_core_shell_vel(part,shell_part,core_part)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part, shell_part, core_part
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part, shell_part, core_part
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'clone_core_shell_vel', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'clone_core_shell_vel', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    LOGICAL                                  :: is_shell
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i
+      LOGICAL                                            :: is_shell
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     DO i = 1, SIZE(part)
        atomic_kind => part(i)%atomic_kind
@@ -207,7 +208,7 @@ CONTAINS
 
   END SUBROUTINE clone_core_shell_vel
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Compute the kinetic energy. Does not subtract the center of mass kinetic
 !>      energy.
 !>      *** is only used by initialize_velocities below ***
@@ -217,19 +218,17 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   FUNCTION compute_ekin(part,ireg) RESULT(ekin)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, INTENT(IN), OPTIONAL            :: ireg
-    REAL(KIND=dp)                            :: ekin
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, INTENT(IN), OPTIONAL                      :: ireg
+      REAL(KIND=dp)                                      :: ekin
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'compute_ekin', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'compute_ekin', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    REAL(KIND=dp)                            :: mass
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i
+      REAL(KIND=dp)                                      :: mass
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     NULLIFY(atomic_kind)
     ekin = 0.0_dp
@@ -251,7 +250,7 @@ CONTAINS
 
   END FUNCTION compute_ekin
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Rescale the velocity to mimic the given external kinetic temperature.
 !>      Optionally also rescale vcom.
 !>      *** is only used by initialize_velocities below ***
@@ -265,22 +264,20 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE rescale_vel(part,simpar,ekin,vcom,ireg,nfree,temp)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(simpar_type), POINTER               :: simpar
-    REAL(KIND=dp), INTENT(INOUT)             :: ekin
-    REAL(KIND=dp), DIMENSION(3), &
-      INTENT(INOUT), OPTIONAL                :: vcom
-    INTEGER, INTENT(IN), OPTIONAL            :: ireg, nfree
-    REAL(KIND=dp), INTENT(IN), OPTIONAL      :: temp
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(simpar_type), POINTER                         :: simpar
+      REAL(KIND=dp), INTENT(INOUT)                       :: ekin
+      REAL(KIND=dp), DIMENSION(3), INTENT(INOUT), &
+         OPTIONAL                                        :: vcom
+      INTEGER, INTENT(IN), OPTIONAL                      :: ireg, nfree
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: temp
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'rescale_vel', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'rescale_vel', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, my_ireg, my_nfree
-    REAL(KIND=dp)                            :: factor, my_temp
+      INTEGER                                            :: i, my_ireg, my_nfree
+      REAL(KIND=dp)                                      :: factor, my_temp
 
     IF(PRESENT(ireg).AND.PRESENT(nfree).AND.PRESENT(temp)) THEN
       my_ireg = ireg
@@ -320,7 +317,7 @@ CONTAINS
 
   END SUBROUTINE rescale_vel
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Rescale the velocity of separated regions independently
 !> \param part ...
 !> \param md_env ...
@@ -328,22 +325,20 @@ CONTAINS
 !> \par History
 !>      2008-11
 !> \author  MI
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE rescale_vel_region(part,md_env,simpar)
 
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(simpar_type), POINTER               :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(simpar_type), POINTER                         :: simpar
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'rescale_vel_region', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'rescale_vel_region', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ireg, nfree, nfree0, &
-                                                nfree_done
-    REAL(KIND=dp)                            :: ekin, temp
-    TYPE(thermal_region_type), POINTER       :: t_region
-    TYPE(thermal_regions_type), POINTER      :: thermal_regions
+      INTEGER                                            :: ireg, nfree, nfree0, nfree_done
+      REAL(KIND=dp)                                      :: ekin, temp
+      TYPE(thermal_region_type), POINTER                 :: t_region
+      TYPE(thermal_regions_type), POINTER                :: thermal_regions
 
     NULLIFY(thermal_regions, t_region)
 
@@ -371,7 +366,7 @@ CONTAINS
     END IF
   END SUBROUTINE  rescale_vel_region
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief subtract center of mass velocity
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -380,17 +375,15 @@ CONTAINS
 !> \par History
 !>      2007-11-6: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE subtract_vcom(part,is_fixed,vcom)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, DIMENSION(:), INTENT(IN)        :: is_fixed
-    REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: vcom
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN)            :: vcom
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'subtract_vcom', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'subtract_vcom', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
+      INTEGER                                            :: i
 
     DO i = 1, SIZE(part)
        SELECT CASE(is_fixed(i))
@@ -415,7 +408,7 @@ CONTAINS
     END DO
   END SUBROUTINE subtract_vcom
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief compute the angular velocity
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -425,22 +418,20 @@ CONTAINS
 !> \par History
 !>      2007-11-9: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE compute_vang(part,is_fixed,rcom,vang)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, DIMENSION(:), INTENT(IN)        :: is_fixed
-    REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: rcom
-    REAL(KIND=dp), DIMENSION(3), INTENT(OUT) :: vang
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN)            :: rcom
+      REAL(KIND=dp), DIMENSION(3), INTENT(OUT)           :: vang
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'compute_vang', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'compute_vang', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    REAL(KIND=dp)                            :: mass, proj
-    REAL(KIND=dp), DIMENSION(3)              :: evals, mang, r
-    REAL(KIND=dp), DIMENSION(3, 3)           :: iner
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i
+      REAL(KIND=dp)                                      :: mass, proj
+      REAL(KIND=dp), DIMENSION(3)                        :: evals, mang, r
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: iner
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     NULLIFY(atomic_kind)
     mang(:)   = 0.0_dp
@@ -486,7 +477,7 @@ CONTAINS
 
   END SUBROUTINE compute_vang
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief subtract the angular velocity
 !>      *** is only used by initialize_velocities below ***
 !> \param part ...
@@ -496,18 +487,16 @@ CONTAINS
 !> \par History
 !>      2007-11-9: created
 !> \author Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE subtract_vang(part,is_fixed,rcom,vang)
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    INTEGER, DIMENSION(:), INTENT(IN)        :: is_fixed
-    REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: rcom, vang
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN)            :: rcom, vang
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'subtract_vang', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'subtract_vang', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i
-    REAL(KIND=dp), DIMENSION(3)              :: r
+      INTEGER                                            :: i
+      REAL(KIND=dp), DIMENSION(3)                        :: r
 
     DO i=1,SIZE(part)
        r(:) = part(i)%r(:) - rcom(:)
@@ -536,7 +525,7 @@ CONTAINS
 
   END SUBROUTINE subtract_vang
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Initializes the velocities to the Maxwellian distribution
 !> \param simpar ...
 !> \param part ...
@@ -552,51 +541,60 @@ CONTAINS
 !> \param core_part ...
 !> \param force_rescaling ...
 !> \param para_env ...
+!> \param write_binary_restart_file ...
 !> \par History
 !>      - is_fixed removed from particle_type
 !>      - 2007-11-07: Cleanup (TV)
 !>      - 2007-11-09: Added angvel_zero feature
 !> \author CJM,MK,Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
-  SUBROUTINE initialize_velocities(simpar, part, force_env, globenv, md_env, &
-       molecule_kinds, label, print_section, subsys_section, shell_present,&
-       shell_part, core_part, force_rescaling, para_env)
+! **************************************************************************************************
+  SUBROUTINE initialize_velocities(simpar, &
+                                   part, &
+                                   force_env, &
+                                   globenv, &
+                                   md_env, &
+                                   molecule_kinds, &
+                                   label, &
+                                   print_section, &
+                                   subsys_section, &
+                                   shell_present,&
+                                   shell_part, &
+                                   core_part, &
+                                   force_rescaling, &
+                                   para_env, &
+                                   write_binary_restart_file)
 
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(mol_kind_new_list_type), POINTER    :: molecule_kinds
-    CHARACTER(LEN=*), INTENT(IN)             :: label
-    TYPE(section_vals_type), POINTER         :: print_section, subsys_section
-    LOGICAL, INTENT(IN)                      :: shell_present
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: shell_part, core_part
-    LOGICAL, INTENT(IN)                      :: force_rescaling
-    TYPE(cp_para_env_type), POINTER          :: para_env
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(global_environment_type), POINTER             :: globenv
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(mol_kind_new_list_type), POINTER              :: molecule_kinds
+      CHARACTER(LEN=*), INTENT(IN)                       :: label
+      TYPE(section_vals_type), POINTER                   :: print_section, subsys_section
+      LOGICAL, INTENT(IN)                                :: shell_present
+      TYPE(particle_type), DIMENSION(:), POINTER         :: shell_part, core_part
+      LOGICAL, INTENT(IN)                                :: force_rescaling
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      LOGICAL, INTENT(IN)                                :: write_binary_restart_file
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'initialize_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'initialize_velocities', &
+         routineP = moduleN//':'//routineN
 
-    CHARACTER(LEN=default_string_length)     :: my_format
-    INTEGER                                  :: handle, i, ifixd, &
-                                                imolecule_kind, iw, natoms, &
-                                                num_x
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: is_fixed
-    LOGICAL                                  :: success
-    REAL(KIND=dp)                            :: ecom, ekin, mass, mass_tot, &
-                                                temp, tmp_r1
-    REAL(KIND=dp), DIMENSION(3)              :: rcom, vang, vcom
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_logger_type), POINTER            :: logger
-    TYPE(fixd_constraint_type), &
-      DIMENSION(:), POINTER                  :: fixd_list
-    TYPE(molecule_kind_type), DIMENSION(:), &
-      POINTER                                :: molecule_kind_set
-    TYPE(molecule_kind_type), POINTER        :: molecule_kind
+      CHARACTER(LEN=default_string_length)               :: my_format
+      INTEGER                                            :: handle, i, ifixd, imolecule_kind, iw, &
+                                                            natoms, num_x
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: is_fixed
+      LOGICAL                                            :: success
+      REAL(KIND=dp)                                      :: ecom, ekin, mass, mass_tot, temp, tmp_r1
+      REAL(KIND=dp), DIMENSION(3)                        :: rcom, vang, vcom
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(fixd_constraint_type), DIMENSION(:), POINTER  :: fixd_list
+      TYPE(molecule_kind_type), DIMENSION(:), POINTER    :: molecule_kind_set
+      TYPE(molecule_kind_type), POINTER                  :: molecule_kind
+      TYPE(section_vals_type), POINTER                   :: md_section, root_section, vib_section
 
     CALL timeset(routineN,handle)
 
@@ -641,13 +639,31 @@ CONTAINS
        simpar%v_shock = simpar%v_shock * SQRT ( mass_tot )
     END IF
 
-
     CALL read_input_velocities(simpar, part, force_env, md_env, subsys_section,&
              shell_present, shell_part, core_part, force_rescaling, para_env, is_fixed, success)
-    IF(.NOT.success) &
-       CALL generate_velocities(simpar, part, force_env, globenv, md_env, shell_present,&
-                shell_part, core_part, is_fixed, iw)
-
+    IF (.NOT.success) THEN
+       SELECT CASE (simpar%initialization_method)
+       CASE (md_init_default)
+          CALL generate_velocities(simpar, part, force_env, globenv, md_env, shell_present,&
+               shell_part, core_part, is_fixed, iw)
+       CASE (md_init_vib)
+          CALL force_env_get(force_env=force_env, root_section=root_section)
+          md_section => section_vals_get_subs_vals(root_section, "MOTION%MD")
+          vib_section => section_vals_get_subs_vals(root_section, "VIBRATIONAL_ANALYSIS")
+          CALL generate_coords_vels_vib(simpar, &
+                                        part, &
+                                        md_section, &
+                                        vib_section, &
+                                        force_env, &
+                                        globenv, &
+                                        shell_present, &
+                                        shell_part, &
+                                        core_part, &
+                                        is_fixed)
+          ! update restart file for the modified coordinates and velocities
+          CALL update_subsys(subsys_section, force_env, .FALSE., write_binary_restart_file)
+       END SELECT
+    END IF
 
     IF (iw>0) THEN
        ! Recompute vcom, ecom and ekin for IO
@@ -681,7 +697,7 @@ CONTAINS
   END SUBROUTINE initialize_velocities
 
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Read velocities from binary restart file if available
 !> \param simpar ...
 !> \param part ...
@@ -696,42 +712,37 @@ CONTAINS
 !> \param is_fixed ...
 !> \param success ...
 !> \author CJM,MK,Toon Verstraelen <Toon.Verstraelen@gmail.com>
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE read_input_velocities(simpar, part, force_env, md_env, subsys_section,&
        shell_present, shell_part, core_part, force_rescaling, para_env, is_fixed, success)
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(section_vals_type), POINTER         :: subsys_section
-    LOGICAL, INTENT(IN)                      :: shell_present
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: shell_part, core_part
-    LOGICAL, INTENT(IN)                      :: force_rescaling
-    TYPE(cp_para_env_type), POINTER          :: para_env
-    INTEGER, DIMENSION(:), INTENT(INOUT)     :: is_fixed
-    LOGICAL, INTENT(OUT)                     :: success
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(section_vals_type), POINTER                   :: subsys_section
+      LOGICAL, INTENT(IN)                                :: shell_present
+      TYPE(particle_type), DIMENSION(:), POINTER         :: shell_part, core_part
+      LOGICAL, INTENT(IN)                                :: force_rescaling
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      INTEGER, DIMENSION(:), INTENT(INOUT)               :: is_fixed
+      LOGICAL, INTENT(OUT)                               :: success
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'read_input_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'read_input_velocities', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, natoms, nshell, shell_index
-    LOGICAL :: atomvel_explicit, atomvel_read, corevel_explicit, &
-      corevel_read, is_ok, rescale_regions, shellvel_explicit, shellvel_read
-    REAL(KIND=dp)                            :: ecom, ekin, fac_massc, &
-                                                fac_masss, mass
-    REAL(KIND=dp), DIMENSION(3)              :: vc, vcom, vs
-    REAL(KIND=dp), DIMENSION(:), POINTER     :: vel
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(cp_sll_val_type), POINTER           :: atom_list, core_list, &
-                                                shell_list
-    TYPE(section_vals_type), POINTER         :: atomvel_section, &
-                                                corevel_section, &
-                                                shellvel_section
-    TYPE(shell_kind_type), POINTER           :: shell
-    TYPE(thermal_regions_type), POINTER      :: thermal_regions
-    TYPE(val_type), POINTER                  :: val
+      INTEGER                                            :: i, natoms, nshell, shell_index
+      LOGICAL :: atomvel_explicit, atomvel_read, corevel_explicit, corevel_read, is_ok, &
+         rescale_regions, shellvel_explicit, shellvel_read
+      REAL(KIND=dp)                                      :: ecom, ekin, fac_massc, fac_masss, mass
+      REAL(KIND=dp), DIMENSION(3)                        :: vc, vcom, vs
+      REAL(KIND=dp), DIMENSION(:), POINTER               :: vel
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(cp_sll_val_type), POINTER                     :: atom_list, core_list, shell_list
+      TYPE(section_vals_type), POINTER                   :: atomvel_section, corevel_section, &
+                                                            shellvel_section
+      TYPE(shell_kind_type), POINTER                     :: shell
+      TYPE(thermal_regions_type), POINTER                :: thermal_regions
+      TYPE(val_type), POINTER                            :: val
 
 ! Initializing parameters
 
@@ -866,8 +877,322 @@ CONTAINS
      END IF
   END SUBROUTINE read_input_velocities
 
+! **************************************************************************************************
+!> \brief Initializing velocities AND positions randomly on all processors, based on vibrational
+!>        modes of the system, so that the starting coordinates are already very close to
+!>        canonical ensumble corresponding to temperature of a head bath.
+!> \param simpar          : MD simulation parameters
+!> \param particles       : global array of all particles
+!> \param md_section      : MD input subsection
+!> \param vib_section     : vibrational analysis input section
+!> \param force_env       : force environment container
+!> \param global_env      : global environment container
+!> \param shell_present   : if core-shell model is used
+!> \param shell_particles : global array of all shell particles in shell model
+!> \param core_particles  : global array of all core particles in shell model
+!> \param is_fixed        : array of size of total number of atoms, that determines if any
+!>                          cartesian components are fixed
+!> \author CJM,MK,Toon Verstraelen <Toon.Verstraelen@gmail.com>, Ole Schuett
+! **************************************************************************************************
+  SUBROUTINE generate_coords_vels_vib(simpar, &
+                                      particles, &
+                                      md_section, &
+                                      vib_section, &
+                                      force_env, &
+                                      global_env, &
+                                      shell_present, &
+                                      shell_particles, &
+                                      core_particles, &
+                                      is_fixed)
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particles
+      TYPE(section_vals_type), POINTER                   :: md_section, vib_section
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(global_environment_type), POINTER             :: global_env
+      LOGICAL, INTENT(IN)                                :: shell_present
+      TYPE(particle_type), DIMENSION(:), POINTER         :: shell_particles, core_particles
+      INTEGER, DIMENSION(:), INTENT(IN)                  :: is_fixed
 
-! *****************************************************************************
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'generate_coords_vels_vib', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: dof, fixed_dof, iatom, ii, imode, &
+                                                            my_dof, natoms, shell_index
+      REAL(KIND=dp)                                      :: Erand, mass, my_phase, ratio, temperature
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: eigenvalues, phase, random
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: dr, eigenvectors
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(rng_stream_type), POINTER                     :: random_stream
+
+     NULLIFY(random_stream)
+     CALL cite_reference(West2006)
+     natoms = SIZE(particles)
+     temperature = simpar%temp_ext
+     my_dof = 3*natoms
+     ALLOCATE (eigenvalues(my_dof))
+     ALLOCATE (eigenvectors(my_dof,my_dof))
+     ALLOCATE (phase(my_dof))
+     ALLOCATE (random(my_dof))
+     ALLOCATE (dr(3,natoms))
+     CALL force_env_get(force_env=force_env, para_env=para_env)
+     ! read vibration modes
+     CALL read_vib_eigs_unformatted(md_section, &
+                                    vib_section, &
+                                    para_env, &
+                                    dof, &
+                                    eigenvalues, &
+                                    eigenvectors)
+     IF (my_dof .NE. dof) THEN
+        CALL cp_abort(__LOCATION__, &
+                      "number of degrees of freedom in vibrational analysis data "// &
+                      "do not match total number of cartesian degrees of freedom")
+     END IF
+     ! read phases
+     CALL section_vals_val_get(md_section, "INITIAL_VIBRATION%PHASE", r_val=my_phase)
+     my_phase = MIN(1.0_dp, my_phase)
+     ! generate random numbers
+     CALL create_rng_stream(random_stream, name="MD_INIT_VIB", distribution_type=UNIFORM)
+     CALL random_numbers(random, random_stream)
+     IF (my_phase .LT. 0.0_dp) THEN
+        CALL random_numbers(phase, random_stream)
+     ELSE
+        phase = my_phase
+     END IF
+     CALL delete_rng_stream(random_stream)
+     ! the first three modes are acoustic with zero frequencies,
+     ! exclude these from considerations
+     my_dof = dof - 3
+     ! randomly selects energy from distribution about kT, all
+     ! energies are scaled so that the sum over vibration modes gives
+     ! exactly my_dof*kT. Note that k = 1.0 in atomic units
+     Erand = 0.0_dp
+     DO imode = 4, dof
+        Erand = Erand - temperature*LOG(1.0_dp-random(imode))
+     END DO
+     ! need to take into account of fixed constraints too
+     fixed_dof = 0
+     DO iatom = 1, natoms
+        SELECT CASE (is_fixed(iatom))
+        CASE (use_perd_x, use_perd_y, use_perd_z)
+           fixed_dof = fixed_dof + 1
+        CASE (use_perd_xy, use_perd_xz, use_perd_yz)
+           fixed_dof = fixed_dof + 2
+        CASE (use_perd_xyz)
+           fixed_dof = fixed_dof + 3
+        END SELECT
+     END DO
+     my_dof = my_dof - fixed_dof
+     ratio = REAL(my_dof,KIND=dp)*temperature/Erand
+     ! update  velocities AND positions
+     DO iatom = 1, natoms
+        atomic_kind => particles(iatom)%atomic_kind
+        CALL get_atomic_kind(atomic_kind=atomic_kind, mass=mass)
+        SELECT CASE (is_fixed(iatom))
+        CASE (use_perd_x)
+           DO ii = 2, 3
+              dr(ii, iatom) = dr_from_vib_data(iatom, ii, mass, temperature, eigenvalues, &
+                                               eigenvectors, random, phase, dof, ratio)
+              particles(iatom)%v(ii) = dv_from_vib_data(iatom, ii, mass, temperature, &
+                                                        eigenvectors, random, phase, dof, &
+                                                        ratio)
+           END DO
+        CASE (use_perd_y)
+           DO ii = 1, 3, 2
+              dr(ii, iatom) = dr_from_vib_data(iatom, ii, mass, temperature, eigenvalues, &
+                                               eigenvectors, random, phase, dof, ratio)
+              particles(iatom)%v(ii) = dv_from_vib_data(iatom, ii, mass, temperature, &
+                                                        eigenvectors, random, phase, dof, &
+                                                        ratio)
+           END DO
+        CASE (use_perd_z)
+           DO ii = 1, 2
+              dr(ii, iatom) = dr_from_vib_data(iatom, ii, mass, temperature, eigenvalues, &
+                                               eigenvectors, random, phase, dof, ratio)
+              particles(iatom)%v(ii) = dv_from_vib_data(iatom, ii, mass, temperature, &
+                                                        eigenvectors, random, phase, dof, &
+                                                        ratio)
+           END DO
+        CASE (use_perd_xy)
+           dr(3, iatom) = dr_from_vib_data(iatom, 3, mass, temperature, eigenvalues, &
+                                            eigenvectors, random, phase, dof, ratio)
+           particles(iatom)%v(3) = dv_from_vib_data(iatom, 3, mass, temperature, &
+                                                    eigenvectors, random, phase, dof, &
+                                                    ratio)
+        CASE (use_perd_xz)
+           dr(2, iatom) = dr_from_vib_data(iatom, 2, mass, temperature, eigenvalues, &
+                                           eigenvectors, random, phase, dof, ratio)
+           particles(iatom)%v(2) = dv_from_vib_data(iatom, 2, mass, temperature, &
+                                                    eigenvectors, random, phase, dof, &
+                                                    ratio)
+        CASE (use_perd_yz)
+           dr(1, iatom) = dr_from_vib_data(iatom, 1, mass, temperature, eigenvalues, &
+                                           eigenvectors, random, phase, dof, ratio)
+           particles(iatom)%v(1) = dv_from_vib_data(iatom, 1, mass, temperature, &
+                                                    eigenvectors, random, phase, dof, &
+                                                    ratio)
+        CASE (use_perd_none)
+           DO ii = 1, 3
+              dr(ii, iatom) = dr_from_vib_data(iatom, ii, mass, temperature, eigenvalues, &
+                                               eigenvectors, random, phase, dof, ratio)
+              particles(iatom)%v(ii) = dv_from_vib_data(iatom, ii, mass, temperature, &
+                                                        eigenvectors, random, phase, dof, &
+                                                        ratio)
+           END DO
+        END SELECT
+     END DO ! iatom
+     ! free memory
+     DEALLOCATE (eigenvalues)
+     DEALLOCATE (eigenvectors)
+     DEALLOCATE (phase)
+     DEALLOCATE (random)
+     ! update particle coordinates
+     DO iatom = 1, natoms
+        particles(iatom)%r(:) = particles(iatom)%r(:) + dr(:,iatom)
+     END DO
+     ! update core-shell model coordinates
+     IF (shell_present) THEN
+        ! particles have moved, and for core-shell model this means
+        ! the cores and shells must also move by the same amount. The
+        ! shell positions will then be optimised if needed
+        shell_index = particles(iatom)%shell_index
+        IF (shell_index .NE. 0) THEN
+           core_particles(shell_index)%r(:) = core_particles(shell_index)%r(:) + &
+                                              dr(:,iatom)
+           shell_particles(shell_index)%r(:) = shell_particles(shell_index)%r(:) + &
+                                               dr(:,iatom)
+        END IF
+        CALL optimize_shell_core(force_env, &
+                                 particles, &
+                                 shell_particles, &
+                                 core_particles, &
+                                 global_env)
+     END IF
+     ! cleanup
+     DEALLOCATE(dr)
+  END SUBROUTINE generate_coords_vels_vib
+
+! **************************************************************************************************
+!> \brief calculates componbent of initial velocity of an atom from vibreational modes
+!> \param iatom        : global atomic index
+!> \param icart        : cartesian index (1, 2 or 3)
+!> \param mass         : atomic mass
+!> \param temperature  : target temperature of canonical ensemble
+!> \param eigenvalues  : array containing all cartesian vibrational mode eigenvalues (frequencies)
+!> \param eigenvectors : array containing all corresponding vibrational mode eigenvectors
+!>                       (displacements)
+!> \param random       : array containing uniform distributed random numbers, must be the size
+!>                       of 3*natoms. Numbers must be between 0 and 1
+!> \param phase        : array containing numbers between 0 and 1 that determines for each
+!>                       vibration mode the ratio of potential energy vs kinetic energy contribution
+!>                       to total energy
+!> \param dof          : total number of degrees of freedom, = 3*natoms
+!> \param scale        : scale to make sure the sum of vibrational modes give the correct energy
+!> \retval res         : outputs icart-th cartesian component of initial position of atom iatom
+!> \author Lianheng Tong, lianheng.tong@kcl.ac.uk
+! **************************************************************************************************
+  PURE FUNCTION dr_from_vib_data(iatom, &
+                                 icart, &
+                                 mass, &
+                                 temperature, &
+                                 eigenvalues, &
+                                 eigenvectors, &
+                                 random, &
+                                 phase, &
+                                 dof, &
+                                 scale) &
+                                 RESULT(res)
+      INTEGER, INTENT(IN)                                :: iatom, icart
+      REAL(KIND=dp), INTENT(IN)                          :: mass, temperature
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: eigenvalues
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: eigenvectors
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: random, phase
+      INTEGER, INTENT(IN)                                :: dof
+      REAL(KIND=dp), INTENT(IN)                          :: scale
+      REAL(KIND=dp)                                      :: res
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'dr_from_vib_data', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: imode, ind
+
+     res = 0.0_dp
+     ! assuming the eigenvalues are sorted in accending order, the
+     ! first three modes are acoustic with zero frequencies. These are
+     ! excluded from considerations, and should have been reflected in
+     ! the calculation of scale outside this function
+     IF (mass .GT. 0.0_dp) THEN
+        ! eigenvector rows assumed to be grouped in atomic blocks
+        ind = (iatom - 1)*3 + icart
+        DO imode = 4, dof
+           res = res + &
+                 SQRT(-2.0_dp*scale*temperature*LOG(1-random(imode))/mass) / &
+                 eigenvalues(imode) * &
+                 eigenvectors(ind,imode) * &
+                 COS(2.0_dp*pi*phase(imode))
+        END DO
+     END IF
+  END FUNCTION dr_from_vib_data
+
+! **************************************************************************************************
+!> \brief calculates componbent of initial velocity of an atom from vibreational modes
+!> \param iatom        : global atomic index
+!> \param icart        : cartesian index (1, 2 or 3)
+!> \param mass         : atomic mass
+!> \param temperature  : target temperature of canonical ensemble
+!> \param eigenvectors : array containing all corresponding vibrational mode eigenvectors
+!>                       (displacements)
+!> \param random       : array containing uniform distributed random numbers, must be the size
+!>                       of 3*natoms. Numbers must be between 0 and 1
+!> \param phase        : array containing numbers between 0 and 1 that determines for each
+!>                       vibration mode the ratio of potential energy vs kinetic energy contribution
+!>                       to total energy
+!> \param dof          : total number of degrees of freedom, = 3*natoms
+!> \param scale        : scale to make sure the sum of vibrational modes give the correct energy
+!> \retval res         : outputs icart-th cartesian component of initial velocity of atom iatom
+!> \author Lianheng Tong, lianheng.tong@kcl.ac.uk
+! **************************************************************************************************
+  PURE FUNCTION dv_from_vib_data(iatom, &
+                                 icart, &
+                                 mass, &
+                                 temperature, &
+                                 eigenvectors, &
+                                 random, &
+                                 phase, &
+                                 dof, &
+                                 scale) &
+                                 RESULT(res)
+      INTEGER, INTENT(IN)                                :: iatom, icart
+      REAL(KIND=dp), INTENT(IN)                          :: mass, temperature
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(IN)         :: eigenvectors
+      REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: random, phase
+      INTEGER, INTENT(IN)                                :: dof
+      REAL(KIND=dp), INTENT(IN)                          :: scale
+      REAL(KIND=dp)                                      :: res
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'dv_from_vib_data', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: imode, ind
+
+     res = 0.0_dp
+     ! assuming the eigenvalues are sorted in accending order, the
+     ! first three modes are acoustic with zero frequencies. These are
+     ! excluded from considerations, and should have been reflected in
+     ! the calculation of scale outside this function
+     IF (mass .GT. 0.0_dp) THEN
+        ! eigenvector rows assumed to be grouped in atomic blocks
+        ind = (iatom - 1)*3 + icart
+        DO imode = 4, dof
+           res = res - &
+                 SQRT(-2.0_dp*scale*temperature*LOG(1-random(imode))/mass) * &
+                 eigenvectors(ind,imode) * &
+                 SIN(2.0_dp*pi*phase(imode))
+        END DO
+     END IF
+  END FUNCTION dv_from_vib_data
+
+! **************************************************************************************************
 !> \brief Initializing velocities deterministically on all processors, if not given in input
 !> \param simpar ...
 !> \param part ...
@@ -880,27 +1205,25 @@ CONTAINS
 !> \param is_fixed ...
 !> \param iw ...
 !> \author CJM,MK,Toon Verstraelen <Toon.Verstraelen@gmail.com>, Ole Schuett
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE generate_velocities(simpar, part, force_env, globenv, md_env,&
-                          shell_present, shell_part, core_part, is_fixed, iw)
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(md_environment_type), POINTER       :: md_env
-    LOGICAL, INTENT(IN)                      :: shell_present
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: shell_part, core_part
-    INTEGER, DIMENSION(:), INTENT(INOUT)     :: is_fixed
-    INTEGER, INTENT(IN)                      :: iw
+                                 shell_present, shell_part, core_part, is_fixed, iw)
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(global_environment_type), POINTER             :: globenv
+      TYPE(md_environment_type), POINTER                 :: md_env
+      LOGICAL, INTENT(IN)                                :: shell_present
+      TYPE(particle_type), DIMENSION(:), POINTER         :: shell_part, core_part
+      INTEGER, DIMENSION(:), INTENT(INOUT)               :: is_fixed
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'generate_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'generate_velocities', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, natoms
-    REAL(KIND=dp)                            :: mass
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
+      INTEGER                                            :: i, natoms
+      REAL(KIND=dp)                                      :: mass
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
 
     NULLIFY (atomic_kind)
     natoms = SIZE(part)
@@ -946,8 +1269,8 @@ CONTAINS
      ENDIF
   END SUBROUTINE generate_velocities
 
-! *****************************************************************************
-!> \brief Direct velocities along a low-curvature direction in order to 
+! **************************************************************************************************
+!> \brief Direct velocities along a low-curvature direction in order to
 !>        favors MD trajectories to cross rapidly over small energy barriers
 !>        into neighboring basins.
 !> \param simpar ...
@@ -957,21 +1280,20 @@ CONTAINS
 !> \param is_fixed ...
 !> \param iw ...
 !> \author Ole Schuett
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE soften_velocities(simpar, part, force_env, md_env, is_fixed, iw)
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(md_environment_type), POINTER       :: md_env
-    INTEGER, DIMENSION(:), INTENT(INOUT)     :: is_fixed
-    INTEGER, INTENT(IN)                      :: iw
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(md_environment_type), POINTER                 :: md_env
+      INTEGER, DIMENSION(:), INTENT(INOUT)               :: is_fixed
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'soften_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'soften_velocities', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, k
-    REAL(KIND=dp), DIMENSION(SIZE(part), 3)  :: F, F_t, N, x0
+      INTEGER                                            :: i, k
+      REAL(KIND=dp), DIMENSION(SIZE(part), 3)            :: F, F_t, N, x0
 
     IF(simpar%soften_nsteps <= 0) RETURN !nothing todo
 
@@ -1019,7 +1341,7 @@ CONTAINS
   END SUBROUTINE soften_velocities
 
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale velocities according to temperature and remove rigid body motion.
 !> \param simpar ...
 !> \param part ...
@@ -1027,21 +1349,20 @@ CONTAINS
 !> \param md_env ...
 !> \param is_fixed ...
 !> \author CJM,MK,Toon Verstraelen <Toon.Verstraelen@gmail.com>, Ole Schuett
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE normalize_velocities(simpar, part, force_env, md_env, is_fixed)
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(md_environment_type), POINTER       :: md_env
-    INTEGER, DIMENSION(:), INTENT(INOUT)     :: is_fixed
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(md_environment_type), POINTER                 :: md_env
+      INTEGER, DIMENSION(:), INTENT(INOUT)               :: is_fixed
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'normalize_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'normalize_velocities', &
+         routineP = moduleN//':'//routineN
 
-    REAL(KIND=dp)                            :: ekin
-    REAL(KIND=dp), DIMENSION(3)              :: rcom, vang, vcom
-    TYPE(cell_type), POINTER                 :: cell
+      REAL(KIND=dp)                                      :: ekin
+      REAL(KIND=dp), DIMENSION(3)                        :: rcom, vang, vcom
+      TYPE(cell_type), POINTER                           :: cell
 
      NULLIFY(cell)
 
@@ -1065,34 +1386,32 @@ CONTAINS
   END SUBROUTINE normalize_velocities
 
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Computes Ekin, VCOM and Temp for particles
 !> \param subsys ...
 !> \param md_ener ...
 !> \param vsubtract ...
 !> \par History
 !>     Teodoro Laino - University of Zurich - 09.2007 [tlaino]
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE reset_vcom(subsys, md_ener, vsubtract)
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(md_ener_type), POINTER              :: md_ener
-    REAL(KIND=dp), DIMENSION(3), INTENT(IN)  :: vsubtract
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN)            :: vsubtract
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'reset_vcom', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'reset_vcom', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: atom, handle, iatom, ikind, &
-                                                natom, shell_index
-    INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: ekin_old, imass_c, imass_s, &
-                                                mass, v2
-    REAL(KIND=dp), DIMENSION(3)              :: tmp, v
-    TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(particle_list_type), POINTER        :: core_particles, particles, &
-                                                shell_particles
-    TYPE(shell_kind_type), POINTER           :: shell
+      INTEGER                                            :: atom, handle, iatom, ikind, natom, &
+                                                            shell_index
+      INTEGER, DIMENSION(:), POINTER                     :: atom_list
+      LOGICAL                                            :: is_shell
+      REAL(KIND=dp)                                      :: ekin_old, imass_c, imass_s, mass, v2
+      REAL(KIND=dp), DIMENSION(3)                        :: tmp, v
+      TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
+                                                            shell_particles
+      TYPE(shell_kind_type), POINTER                     :: shell
 
     NULLIFY(particles, atomic_kind, atomic_kinds, atom_list, shell)
     CALL timeset(routineN,handle)
@@ -1158,7 +1477,7 @@ CONTAINS
 
   END SUBROUTINE reset_vcom
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale velocities to get the correct temperature
 !> \param subsys ...
 !> \param md_ener ...
@@ -1167,17 +1486,16 @@ CONTAINS
 !> \param iw ...
 !> \par History
 !>     Teodoro Laino - University of Zurich - 09.2007 [tlaino]
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE scale_velocity(subsys, md_ener, temp_expected, temp_tol, iw)
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(md_ener_type), POINTER              :: md_ener
-    REAL(KIND=dp), INTENT(IN)                :: temp_expected, temp_tol
-    INTEGER, INTENT(IN)                      :: iw
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      REAL(KIND=dp), INTENT(IN)                          :: temp_expected, temp_tol
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity', routineP = moduleN//':'//routineN
 
-    REAL(KIND=dp)                            :: ekin_old, scale, temp_old
+      REAL(KIND=dp)                                      :: ekin_old, scale, temp_old
 
     IF (ABS(temp_expected - md_ener%temp_part/kelvin) > temp_tol) THEN
        scale = 0.0_dp
@@ -1202,7 +1520,7 @@ CONTAINS
     END IF
   END SUBROUTINE scale_velocity
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale velocities of set of regions
 !> \param md_env ...
 !> \param subsys ...
@@ -1210,29 +1528,26 @@ CONTAINS
 !> \param simpar ...
 !> \param iw ...
 !> \par author MI
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE scale_velocity_region(md_env, subsys, md_ener, simpar, iw)
 
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(md_ener_type), POINTER              :: md_ener
-    TYPE(simpar_type), POINTER               :: simpar
-    INTEGER, INTENT(IN)                      :: iw
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      TYPE(simpar_type), POINTER                         :: simpar
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_region', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_region', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ireg, nfree, nfree_done, &
-                                                nregions
-    REAL(KIND=dp)                            :: ekin, ekin_old, &
-                                                ekin_total_new, fscale, &
-                                                vcom(3), vcom_total(3)
-    REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: temp_new, temp_old
-    TYPE(particle_list_type), POINTER        :: particles
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: part
-    TYPE(thermal_region_type), POINTER       :: t_region
-    TYPE(thermal_regions_type), POINTER      :: thermal_regions
+      INTEGER                                            :: ireg, nfree, nfree_done, nregions
+      REAL(KIND=dp)                                      :: ekin, ekin_old, ekin_total_new, fscale, &
+                                                            vcom(3), vcom_total(3)
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: temp_new, temp_old
+      TYPE(particle_list_type), POINTER                  :: particles
+      TYPE(particle_type), DIMENSION(:), POINTER         :: part
+      TYPE(thermal_region_type), POINTER                 :: t_region
+      TYPE(thermal_regions_type), POINTER                :: thermal_regions
 
      NULLIFY( particles, part, thermal_regions, t_region)
      CALL cp_subsys_get(subsys, particles=particles)
@@ -1295,7 +1610,7 @@ CONTAINS
 
   END SUBROUTINE scale_velocity_region
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale velocities  for a specific region
 !> \param subsys ...
 !> \param fscale ...
@@ -1303,28 +1618,28 @@ CONTAINS
 !> \param ekin ...
 !> \param vcom ...
 !> \par author MI
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE scale_velocity_low(subsys,fscale,ireg,ekin,vcom)
 
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    REAL(KIND=dp), INTENT(IN)                :: fscale
-    INTEGER, INTENT(IN)                      :: ireg
-    REAL(KIND=dp), INTENT(OUT)               :: ekin, vcom(3)
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      REAL(KIND=dp), INTENT(IN)                          :: fscale
+      INTEGER, INTENT(IN)                                :: ireg
+      REAL(KIND=dp), INTENT(OUT)                         :: ekin, vcom(3)
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_low', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_low', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: atom, iatom, ikind, my_ireg, &
-                                                natom, shell_index
-    INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: imass, mass, tmass, v2
-    REAL(KIND=dp), DIMENSION(3)              :: tmp, v, vc, vs
-    TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(particle_list_type), POINTER        :: core_particles, particles, &
-                                                shell_particles
-    TYPE(shell_kind_type), POINTER           :: shell
+      INTEGER                                            :: atom, iatom, ikind, my_ireg, natom, &
+                                                            shell_index
+      INTEGER, DIMENSION(:), POINTER                     :: atom_list
+      LOGICAL                                            :: is_shell
+      REAL(KIND=dp)                                      :: imass, mass, tmass, v2
+      REAL(KIND=dp), DIMENSION(3)                        :: tmp, v, vc, vs
+      TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
+                                                            shell_particles
+      TYPE(shell_kind_type), POINTER                     :: shell
 
     NULLIFY(atomic_kinds,particles,shell_particles,core_particles,shell,atom_list)
 
@@ -1399,7 +1714,7 @@ CONTAINS
 
   END SUBROUTINE scale_velocity_low
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale internal motion of CORE-SHELL model to the correct temperature
 !> \param subsys ...
 !> \param md_ener ...
@@ -1408,29 +1723,27 @@ CONTAINS
 !> \param iw ...
 !> \par History
 !>     Teodoro Laino - University of Zurich - 09.2007 [tlaino]
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE scale_velocity_internal(subsys, md_ener,  temp_expected, temp_tol, iw)
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(md_ener_type), POINTER              :: md_ener
-    REAL(KIND=dp), INTENT(IN)                :: temp_expected, temp_tol
-    INTEGER, INTENT(IN)                      :: iw
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      REAL(KIND=dp), INTENT(IN)                          :: temp_expected, temp_tol
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_internal', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_internal', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: atom, iatom, ikind, natom, &
-                                                shell_index
-    INTEGER, DIMENSION(:), POINTER           :: atom_list
-    LOGICAL                                  :: is_shell
-    REAL(KIND=dp)                            :: ekin_shell_old, fac_mass, &
-                                                mass, scale, temp_shell_old, &
-                                                v2
-    REAL(KIND=dp), DIMENSION(3)              :: tmp, v, vc, vs
-    TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(particle_list_type), POINTER        :: core_particles, particles, &
-                                                shell_particles
-    TYPE(shell_kind_type), POINTER           :: shell
+      INTEGER                                            :: atom, iatom, ikind, natom, shell_index
+      INTEGER, DIMENSION(:), POINTER                     :: atom_list
+      LOGICAL                                            :: is_shell
+      REAL(KIND=dp)                                      :: ekin_shell_old, fac_mass, mass, scale, &
+                                                            temp_shell_old, v2
+      REAL(KIND=dp), DIMENSION(3)                        :: tmp, v, vc, vs
+      TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
+                                                            shell_particles
+      TYPE(shell_kind_type), POINTER                     :: shell
 
     NULLIFY(atom_list,atomic_kinds,atomic_kind,core_particles,particles,shell_particles,shell)
     IF (ABS(temp_expected - md_ener%temp_shell/kelvin) > temp_tol) THEN
@@ -1492,7 +1805,7 @@ CONTAINS
     ENDIF
   END SUBROUTINE scale_velocity_internal
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Scale barostat velocities to get the desired temperature
 !> \param md_env ...
 !> \param md_ener ...
@@ -1501,20 +1814,20 @@ CONTAINS
 !> \param iw ...
 !> \par History
 !>     MI 02.2008
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE scale_velocity_baro(md_env, md_ener, temp_expected, temp_tol, iw)
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(md_ener_type), POINTER              :: md_ener
-    REAL(KIND=dp), INTENT(IN)                :: temp_expected, temp_tol
-    INTEGER, INTENT(IN)                      :: iw
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      REAL(KIND=dp), INTENT(IN)                          :: temp_expected, temp_tol
+      INTEGER, INTENT(IN)                                :: iw
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_baro', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'scale_velocity_baro', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: i, j, nfree
-    REAL(KIND=dp)                            :: ekin_old, scale, temp_old
-    TYPE(npt_info_type), POINTER             :: npt( :, : )
-    TYPE(simpar_type), POINTER               :: simpar
+      INTEGER                                            :: i, j, nfree
+      REAL(KIND=dp)                                      :: ekin_old, scale, temp_old
+      TYPE(npt_info_type), POINTER                       :: npt( :, : )
+      TYPE(simpar_type), POINTER                         :: simpar
 
     NULLIFY( npt, simpar)
     CALL get_md_env ( md_env, simpar = simpar, npt = npt)
@@ -1548,7 +1861,7 @@ CONTAINS
    END IF
   END SUBROUTINE scale_velocity_baro
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Perform all temperature manipulations during a QS MD run.
 !> \param simpar ...
 !> \param md_env ...
@@ -1559,21 +1872,21 @@ CONTAINS
 !>     Creation (15.09.2003,MK)
 !>     adapted to force_env (05.10.2003,fawzi)
 !>     Cleaned (09.2007) Teodoro Laino [tlaino] - University of Zurich
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE temperature_control(simpar, md_env, md_ener,force_env,logger)
 
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(md_ener_type), POINTER              :: md_ener
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(cp_logger_type), POINTER            :: logger
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(cp_logger_type), POINTER                      :: logger
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'temperature_control', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'temperature_control', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, iw
-    TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_subsys_type), POINTER            :: subsys
+      INTEGER                                            :: handle, iw
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_subsys_type), POINTER                      :: subsys
 
     CALL timeset(routineN,handle)
     NULLIFY(subsys, para_env)
@@ -1610,7 +1923,7 @@ CONTAINS
     CALL timestop(handle)
   END SUBROUTINE temperature_control
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Set to 0 the velocity of the COM along MD runs, if required.
 !> \param md_ener ...
 !> \param force_env ...
@@ -1619,22 +1932,21 @@ CONTAINS
 !> \par History
 !>      Creation (29.04.2007,MI)
 !>      Cleaned (09.2007) Teodoro Laino [tlaino] - University of Zurich
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE comvel_control(md_ener,force_env, md_section, logger)
 
-    TYPE(md_ener_type), POINTER              :: md_ener
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(section_vals_type), POINTER         :: md_section
-    TYPE(cp_logger_type), POINTER            :: logger
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(section_vals_type), POINTER                   :: md_section
+      TYPE(cp_logger_type), POINTER                      :: logger
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'comvel_control', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'comvel_control', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, iw
-    LOGICAL                                  :: explicit
-    REAL(KIND=dp)                            :: comvel_tol, temp_old, vel_com
-    REAL(KIND=dp), DIMENSION(3)              :: vcom_old
-    TYPE(cp_subsys_type), POINTER            :: subsys
+      INTEGER                                            :: handle, iw
+      LOGICAL                                            :: explicit
+      REAL(KIND=dp)                                      :: comvel_tol, temp_old, vel_com
+      REAL(KIND=dp), DIMENSION(3)                        :: vcom_old
+      TYPE(cp_subsys_type), POINTER                      :: subsys
 
     CALL timeset(routineN,handle)
     NULLIFY(subsys)
@@ -1676,7 +1988,7 @@ CONTAINS
     CALL timestop(handle)
   END SUBROUTINE comvel_control
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Set to 0 the angular velocity along MD runs, if required.
 !> \param md_ener ...
 !> \param force_env ...
@@ -1684,32 +1996,28 @@ CONTAINS
 !> \param logger ...
 !> \par History
 !>      Creation (10.2009) Teodoro Laino [tlaino]
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE angvel_control(md_ener, force_env, md_section, logger)
 
-    TYPE(md_ener_type), POINTER              :: md_ener
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(section_vals_type), POINTER         :: md_section
-    TYPE(cp_logger_type), POINTER            :: logger
+      TYPE(md_ener_type), POINTER                        :: md_ener
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(section_vals_type), POINTER                   :: md_section
+      TYPE(cp_logger_type), POINTER                      :: logger
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'angvel_control', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'angvel_control', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, ifixd, &
-                                                imolecule_kind, iw, natoms
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: is_fixed
-    LOGICAL                                  :: explicit
-    REAL(KIND=dp)                            :: angvel_tol, rcom(3), &
-                                                temp_old, vang(3), vang_new(3)
-    TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(fixd_constraint_type), &
-      DIMENSION(:), POINTER                  :: fixd_list
-    TYPE(mol_kind_new_list_type), POINTER    :: molecule_kinds
-    TYPE(molecule_kind_type), DIMENSION(:), &
-      POINTER                                :: molecule_kind_set
-    TYPE(molecule_kind_type), POINTER        :: molecule_kind
-    TYPE(particle_list_type), POINTER        :: particles
+      INTEGER                                            :: handle, ifixd, imolecule_kind, iw, natoms
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: is_fixed
+      LOGICAL                                            :: explicit
+      REAL(KIND=dp)                                      :: angvel_tol, rcom(3), temp_old, vang(3), &
+                                                            vang_new(3)
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(fixd_constraint_type), DIMENSION(:), POINTER  :: fixd_list
+      TYPE(mol_kind_new_list_type), POINTER              :: molecule_kinds
+      TYPE(molecule_kind_type), DIMENSION(:), POINTER    :: molecule_kind_set
+      TYPE(molecule_kind_type), POINTER                  :: molecule_kind
+      TYPE(particle_list_type), POINTER                  :: particles
 
     CALL timeset(routineN,handle)
     ! If requested rescale ANGVEL
@@ -1771,7 +2079,7 @@ CONTAINS
     CALL timestop(handle)
   END SUBROUTINE angvel_control
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief Initialize Velocities for MD runs
 !> \param force_env ...
 !> \param simpar ...
@@ -1782,37 +2090,34 @@ CONTAINS
 !> \param write_binary_restart_file ...
 !> \par History
 !>     Teodoro Laino - University of Zurich - 09.2007 [tlaino]
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE setup_velocities(force_env, simpar, globenv, md_env, md_section, &
                               constraint_section, write_binary_restart_file)
 
-    TYPE(force_env_type), POINTER            :: force_env
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(global_environment_type), POINTER   :: globenv
-    TYPE(md_environment_type), POINTER       :: md_env
-    TYPE(section_vals_type), POINTER         :: md_section, constraint_section
-    LOGICAL, INTENT(IN)                      :: write_binary_restart_file
+      TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(global_environment_type), POINTER             :: globenv
+      TYPE(md_environment_type), POINTER                 :: md_env
+      TYPE(section_vals_type), POINTER                   :: md_section, constraint_section
+      LOGICAL, INTENT(IN)                                :: write_binary_restart_file
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'setup_velocities', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'setup_velocities', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle, nconstraint, &
-                                                nconstraint_fixd
-    LOGICAL                                  :: apply_cns0, shell_adiabatic, &
-                                                shell_present
-    TYPE(atomic_kind_list_type), POINTER     :: atomic_kinds
-    TYPE(cell_type), POINTER                 :: cell
-    TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(cp_subsys_type), POINTER            :: subsys
-    TYPE(mol_kind_new_list_type), POINTER    :: molecule_kinds
-    TYPE(particle_list_type), POINTER        :: core_particles, particles, &
-                                                shell_particles
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: core_particle_set, &
-                                                particle_set, &
-                                                shell_particle_set
-    TYPE(section_vals_type), POINTER         :: force_env_section, &
-                                                print_section, subsys_section
+      INTEGER                                            :: handle, nconstraint, nconstraint_fixd
+      LOGICAL                                            :: apply_cns0, shell_adiabatic, &
+                                                            shell_present
+      TYPE(atomic_kind_list_type), POINTER               :: atomic_kinds
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(mol_kind_new_list_type), POINTER              :: molecule_kinds
+      TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
+                                                            shell_particles
+      TYPE(particle_type), DIMENSION(:), POINTER         :: core_particle_set, particle_set, &
+                                                            shell_particle_set
+      TYPE(section_vals_type), POINTER                   :: force_env_section, print_section, &
+                                                            subsys_section
 
     CALL timeset(routineN,handle)
 
@@ -1860,20 +2165,32 @@ CONTAINS
        core_particle_set  =>  core_particles%els
     END IF
 
-    CALL initialize_velocities(simpar,particle_set, molecule_kinds=molecule_kinds,&
-         force_env=force_env, globenv=globenv, md_env=md_env,&
-         label="Velocities initialization",print_section=print_section, &
-         subsys_section=subsys_section, shell_present=(shell_present.AND.shell_adiabatic), &
-         shell_part=shell_particle_set, core_part=core_particle_set, force_rescaling=.FALSE., &
-         para_env=para_env)
+    CALL initialize_velocities(simpar, &
+                               particle_set, &
+                               molecule_kinds=molecule_kinds, &
+                               force_env=force_env, &
+                               globenv=globenv, &
+                               md_env=md_env, &
+                               label="Velocities initialization", &
+                               print_section=print_section, &
+                               subsys_section=subsys_section, &
+                               shell_present=(shell_present.AND.shell_adiabatic), &
+                               shell_part=shell_particle_set, &
+                               core_part=core_particle_set, &
+                               force_rescaling=.FALSE., &
+                               para_env=para_env, &
+                               write_binary_restart_file=write_binary_restart_file)
 
     ! Apply constraints if required and rescale velocities..
     IF (simpar%ensemble /= reftraj_ensemble) THEN
        IF (apply_cns0) THEN
-          CALL force_env_calc_energy_force ( force_env, calc_force=.TRUE.)
-          CALL force_env_shake(force_env,shake_tol=simpar%shake_tol,&
-               log_unit=simpar%info_constraint,lagrange_mult=simpar%lagrange_multipliers,&
-               dump_lm=simpar%dump_lm,compold=.TRUE.)
+          CALL force_env_calc_energy_force(force_env, calc_force=.TRUE.)
+          CALL force_env_shake(force_env, &
+                               shake_tol=simpar%shake_tol,&
+                               log_unit=simpar%info_constraint, &
+                               lagrange_mult=simpar%lagrange_multipliers,&
+                               dump_lm=simpar%dump_lm, &
+                               compold=.TRUE.)
           CALL force_env_rattle(force_env,shake_tol=simpar%shake_tol,&
                log_unit=simpar%info_constraint,lagrange_mult=simpar%lagrange_multipliers,&
                dump_lm=simpar%dump_lm,reset=.TRUE.)
@@ -1890,13 +2207,21 @@ CONTAINS
           ! Reinitialize velocities rescaling properly after rattle
           subsys_section => section_vals_get_subs_vals(force_env_section,"SUBSYS")
           CALL update_subsys(subsys_section,force_env,.FALSE.,write_binary_restart_file)
-
-          CALL initialize_velocities(simpar,particle_set, molecule_kinds=molecule_kinds,&
-               force_env=force_env, globenv=globenv, md_env=md_env,&
-               label="Re-Initializing velocities after applying constraints",print_section=print_section, &
-               subsys_section=subsys_section, shell_present=(shell_present.AND.shell_adiabatic), &
-               shell_part=shell_particle_set, core_part=core_particle_set, force_rescaling=.TRUE., &
-               para_env=para_env)
+          CALL initialize_velocities(simpar, &
+                                     particle_set, &
+                                     molecule_kinds=molecule_kinds,&
+                                     force_env=force_env, &
+                                     globenv=globenv, &
+                                     md_env=md_env, &
+                                     label="Re-Initializing velocities after applying constraints", &
+                                     print_section=print_section, &
+                                     subsys_section=subsys_section, &
+                                     shell_present=(shell_present.AND.shell_adiabatic), &
+                                     shell_part=shell_particle_set, &
+                                     core_part=core_particle_set, &
+                                     force_rescaling=.TRUE., &
+                                     para_env=para_env, &
+                                     write_binary_restart_file=write_binary_restart_file)
        END IF
     END IF
 
@@ -1907,7 +2232,7 @@ CONTAINS
 
   END SUBROUTINE setup_velocities
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief   Perform the initialization for a cascade run
 !> \param simpar ...
 !> \param particle_set ...
@@ -1916,42 +2241,36 @@ CONTAINS
 !> \date    05.02.2012
 !> \author  Matthias Krack (MK)
 !> \version 1.0
-! *****************************************************************************
+! **************************************************************************************************
   SUBROUTINE initialize_cascade(simpar,particle_set,molecule_kinds,md_section)
 
-    TYPE(simpar_type), POINTER               :: simpar
-    TYPE(particle_type), DIMENSION(:), &
-      POINTER                                :: particle_set
-    TYPE(mol_kind_new_list_type), POINTER    :: molecule_kinds
-    TYPE(section_vals_type), POINTER         :: md_section
+      TYPE(simpar_type), POINTER                         :: simpar
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
+      TYPE(mol_kind_new_list_type), POINTER              :: molecule_kinds
+      TYPE(section_vals_type), POINTER                   :: md_section
 
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'initialize_cascade', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'initialize_cascade', &
+         routineP = moduleN//':'//routineN
 
-    CHARACTER(len=2*default_string_length)   :: line
-    INTEGER                                  :: handle, iatom, ifixd, &
-                                                imolecule_kind, iparticle, &
-                                                iw, natom, nparticle
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: atom_index, is_fixed
-    LOGICAL                                  :: init_cascade, is_ok, &
-                                                no_read_error
-    REAL(KIND=dp)                            :: ecom, ekin, energy, norm, &
-                                                temp, temperature
-    REAL(KIND=dp), ALLOCATABLE, DIMENSION(:) :: matom, weight
-    REAL(KIND=dp), ALLOCATABLE, &
-      DIMENSION(:, :)                        :: vatom
-    REAL(KIND=dp), DIMENSION(3)              :: vcom
-    TYPE(atomic_kind_type), POINTER          :: atomic_kind
-    TYPE(cp_logger_type), POINTER            :: logger
-    TYPE(cp_sll_val_type), POINTER           :: atom_list
-    TYPE(fixd_constraint_type), &
-      DIMENSION(:), POINTER                  :: fixd_list
-    TYPE(molecule_kind_type), DIMENSION(:), &
-      POINTER                                :: molecule_kind_set
-    TYPE(molecule_kind_type), POINTER        :: molecule_kind
-    TYPE(section_vals_type), POINTER         :: atom_list_section, &
-                                                cascade_section, print_section
-    TYPE(val_type), POINTER                  :: val
+      CHARACTER(len=2*default_string_length)             :: line
+      INTEGER                                            :: handle, iatom, ifixd, imolecule_kind, &
+                                                            iparticle, iw, natom, nparticle
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_index, is_fixed
+      LOGICAL                                            :: init_cascade, is_ok, no_read_error
+      REAL(KIND=dp)                                      :: ecom, ekin, energy, norm, temp, &
+                                                            temperature
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: matom, weight
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: vatom
+      REAL(KIND=dp), DIMENSION(3)                        :: vcom
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(cp_sll_val_type), POINTER                     :: atom_list
+      TYPE(fixd_constraint_type), DIMENSION(:), POINTER  :: fixd_list
+      TYPE(molecule_kind_type), DIMENSION(:), POINTER    :: molecule_kind_set
+      TYPE(molecule_kind_type), POINTER                  :: molecule_kind
+      TYPE(section_vals_type), POINTER                   :: atom_list_section, cascade_section, &
+                                                            print_section
+      TYPE(val_type), POINTER                            :: val
 
     CALL timeset(routineN,handle)
 

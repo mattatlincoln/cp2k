@@ -372,7 +372,7 @@ check_lib() {
 check_gfortran_module() {
     local __module_name=$1
     local __FC=${FC:-gfortran}
-    cat <<EOF | $__FC -c -o /dev/null -xf95 -ffree-form - >&- 2>&-
+    cat <<EOF | $__FC -c -o /dev/null -xf95 -ffree-form - > /dev/null 2>&1
 PROGRAM check_gfortran_module
 USE ${__module_name}
 IMPLICIT NONE
@@ -388,7 +388,7 @@ check_gfortran_flag() {
     local __FC=${FC:-gfortran}
     # no need to do a full compilation, just -E -cpp would do for
     # checking flags
-    cat <<EOF | $__FC -E -cpp $__flag -xf95 -ffree-form - >&- 2>&-
+    cat <<EOF | $__FC -E -cpp $__flag -xf95 -ffree-form - > /dev/null 2>&1
 PROGRAM test_code
   IMPLICIT NONE
   PRINT *, "PASS"
@@ -403,7 +403,7 @@ check_gcc_flag() {
     local __CC=${CC:-gcc}
     # no need to do a full compilation, just -E -cpp would do for
     # checking flags
-    cat <<EOF | $__CC -E -cpp $__flag -xc - >&- 2>&-
+    cat <<EOF | $__CC -E -cpp $__flag -xc - > /dev/null 2>&1
 #include <stdio.h>
 int main() {
   printf("PASS\n");
@@ -418,7 +418,7 @@ check_gxx_flag() {
     local __CXX=${CXX:-g++}
     # no need to do a full compilation, just -E -cpp would do for
     # checking flags
-    cat <<EOF | $__CC -E -cpp $__flag -xc - >&- 2>&-
+    cat <<EOF | $__CXX -E -cpp $__flag -xc - > /dev/null 2>&1
 #include <stdio.h>
 int main() {
   printf("PASS\n");
@@ -468,20 +468,32 @@ allowed_gxx_flags() {
     echo $__result
 }
 
+# remove a directory to a given path
+remove_path() {
+    local __path_name=$1
+    local __directory=$2
+    local __path="$(eval echo \$$__path_name)"
+    # must remove all the middle ones first before treating two ends,
+    # otherwise there can be cases where not all __directory are
+    # removed.
+    __path=${__path//:$__directory:/:}
+    __path=${__path#$__directory:}
+    __path=${__path%:$__directory}
+    __path=$(echo "$__path" | sed "s:^$__directory\$::g")
+    eval $__path_name=\"$__path\"
+    export $__path_name
+}
+
 # prepend a directory to a given path
 prepend_path() {
     # prepend directory to $path_name and then export path_name. If
     # the directory already exists in path, bring the directory to the
     # front of the list.
-    local __path_name=$1
-    local __directory=$2
-    if eval [ x\"\$$__path_name\" = x ] ; then
-        eval $__path_name=\"$__directory\"
-    else
-        eval $__path_name=\"$__directory:\$$__path_name\"
-    fi
-    eval $__path_name=\"$(IFS=:; eval unique -d ':' \$$__path_name)\"
-    export $__path_name
+    # $1 is path name
+    # $2 is directory
+    remove_path "$1" "$2"
+    eval $1=\"$2\${$1:+\":\$$1\"}\"
+    eval export $1
 }
 
 # append a directory to a given path
@@ -489,23 +501,11 @@ append_path() {
     # append directory to $path_name and then export path_name. If
     # the directory already exists in path, bring the directory to the
     # back of the list.
-    #
-    # $1 is path_name
+    # $1 is path name
     # $2 is directory
-    local __path_name=$1
-    local __directory=$2
-    if eval [ x\"\$$__path_name\" = x ] ; then
-        eval $__path_name=\"$__directory\"
-    else
-        eval $__path_name=\"\$$__path_name:$__directory\"
-    fi
-    # here, we reverse the list, apply unique, and then reverse back,
-    # so that the last instance of the repeated directory is kept
-    eval $__path_name=\"$(IFS=':'; \
-                reverse -d ':' \
-                        $(unique -d ':' \
-                                 $(eval reverse -d ':' \$$__path_name)))\"
-    export $__path_name
+    remove_path "$1" "$2"
+    eval $1=\"\${$1:+\"\$$1:\"}$2\"
+    eval export $1
 }
 
 # helper routine for reading --enable=* input options

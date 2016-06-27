@@ -55,7 +55,7 @@ OPTIONS:
                           processors you have and try to use all of the
                           processors.
 --no-check-certificate    If you encounter "certificate verification" errors
-                          from wget or ones saying that "common name doesn’t
+                          from wget or ones saying that "common name doesn't
                           match requested host name" while at tarball downloading
                           stage, then the recommended solution is to install
                           the newest wget release.  Alternatively, you can use
@@ -308,7 +308,13 @@ enable_tsan=__FALSE__
 enable_gcc_master=__FALSE__
 enable_libxsmm_master=__FALSE__
 enable_omp=__TRUE__
-enable_cuda=__FALSE__
+if (command -v nvcc >&- 2>&-) ; then
+   echo "nvcc found, enabling CUDA by default"
+   enable_cuda=__TRUE__
+else
+   echo "nvcc not found, disabling CUDA by default"
+   enable_cuda=__FALSE__
+fi
 
 # defaults for CRAY Linux Environment
 if [ "$CRAY_LD_LIBRARY_PATH" ] ; then
@@ -780,8 +786,8 @@ case "$MPI_MODE" in
         ;;
 esac
 
-# math core libraries, need to use reflapck for valgrind builds, as
-# many fast libraries are not necesarily thread safe
+# math core libraries, need to use reflapack for valgrind builds, as
+# many fast libraries are not necesarily valgrind clean
 export REF_MATH_CFLAGS=''
 export REF_MATH_LDFLAGS=''
 export REF_MATH_LIBS=''
@@ -818,9 +824,9 @@ else
     export MATH_LIBS="${FAST_MATH_LIBS}"
 fi
 
-export CP_CFLAGS="${CP_CFLAGS} IF_VALGRIND(${REF_MATH_CFLAGS}|${FAST_MATH_CFLAGS})"
-export CP_LDFLAGS="${CP_LDFLAGS} IF_VALGRIND(${REF_MATH_LDFLAGS}|${FAST_MATH_LDFLAGS})"
-export CP_LIBS="${CP_LIBS} IF_VALGRIND(${REF_MATH_LIBS}|${FAST_MATH_LIBS})"
+export CP_CFLAGS="${CP_CFLAGS} IF_DEBUG(${REF_MATH_CFLAGS}|IF_VALGRIND(${REF_MATH_CFLAGS}|${FAST_MATH_CFLAGS}))"
+export CP_LDFLAGS="${CP_LDFLAGS} IF_DEBUG(${REF_MATH_LDFLAGS}|IF_VALGRIND(${REF_MATH_LDFLAGS}|${FAST_MATH_LDFLAGS}))"
+export CP_LIBS="${CP_LIBS} IF_DEBUG(${REF_MATH_LIBS}|IF_VALGRIND(${REF_MATH_LIBS}|${FAST_MATH_LIBS}))"
 
 # other libraries
 for ii in $lib_list ; do
@@ -856,7 +862,7 @@ NOOPT_FLAGS="-O1"
 
 # those flags that do not influence code generation are used always, the others if debug
 FCDEB_FLAGS="-ffree-form -std=f2003 -fimplicit-none"
-FCDEB_FLAGS_DEBUG="-fsanitize=leak -fcheck='bounds,do,recursion,pointer' -ffpe-trap='invalid,zero,overflow' -finit-real=snan -fno-fast-math"
+FCDEB_FLAGS_DEBUG="-fsanitize=leak -fcheck=bounds,do,recursion,pointer -ffpe-trap=invalid,zero,overflow -finit-real=snan -fno-fast-math"
 
 # code coverage generation flags
 #For gcc 6.0 use -O1 -coverage -fkeep-static-functions
@@ -949,7 +955,7 @@ gen_arch_file() {
     for __flag in $__flags ; do
         eval "__${__flag}=on"
     done
-    # geneate initial arch file
+    # generate initial arch file
     cat $ARCH_FILE_TEMPLATE > $__filename
     # add additional parts
     if [ "$__CUDA" = "on" ] ; then
@@ -963,6 +969,7 @@ EOF
         cat <<EOF >> $__filename
 #
 FCLOGPIPE   =  2> \\\$(notdir \\\$<).warn
+export LC_ALL=C
 EOF
     fi
     # replace variable values in output file using eval

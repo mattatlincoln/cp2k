@@ -1,34 +1,34 @@
-!-----------------------------------------------------------------------------!
-!   CP2K: A general program to perform molecular dynamics simulations         !
-!   Copyright (C) 2000 - 2016  CP2K developers group                          !
-!-----------------------------------------------------------------------------!
+!--------------------------------------------------------------------------------------------------!
+!   CP2K: A general program to perform molecular dynamics simulations                              !
+!   Copyright (C) 2000 - 2016  CP2K developers group                                               !
+!--------------------------------------------------------------------------------------------------!
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief basis types for the calculation of the perturbation of density theory.
 !> \par History
 !>      4.2002 created [fawzi]
 !> \author Fawzi Mohamed
-! *****************************************************************************
+! **************************************************************************************************
 MODULE qs_kpp1_env_types
-  USE cp_dbcsr_interface,              ONLY: cp_dbcsr_deallocate_matrix,&
-                                             cp_dbcsr_p_type
-  USE pw_types,                        ONLY: pw_p_type,&
-                                             pw_release
-  USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
-                                             xc_dset_release
-  USE xc_rho_set_types,                ONLY: xc_rho_set_release,&
-                                             xc_rho_set_type
+   USE cp_dbcsr_interface,              ONLY: cp_dbcsr_deallocate_matrix,&
+                                              cp_dbcsr_p_type
+   USE pw_types,                        ONLY: pw_p_type,&
+                                              pw_release
+   USE xc_derivative_set_types,         ONLY: xc_derivative_set_type,&
+                                              xc_dset_release
+   USE xc_rho_set_types,                ONLY: xc_rho_set_release,&
+                                              xc_rho_set_type
 #include "./base/base_uses.f90"
 
-  IMPLICIT NONE
-  PRIVATE
-  PUBLIC :: qs_kpp1_env_type
-  PUBLIC :: kpp1_release
+   IMPLICIT NONE
+   PRIVATE
+   PUBLIC :: qs_kpp1_env_type
+   PUBLIC :: kpp1_release
 
-  LOGICAL, PRIVATE, PARAMETER :: debug_this_module=.TRUE.
-  CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_kpp1_env_types'
+   LOGICAL, PRIVATE, PARAMETER :: debug_this_module = .TRUE.
+   CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_kpp1_env_types'
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief environement that keeps the informations and temporary
 !>      val to build the kpp1 kernel matrix
 !> \param ref_count reference count (how may objects are sharing this one)
@@ -66,33 +66,32 @@ MODULE qs_kpp1_env_types
      LOGICAL, DIMENSION(:), POINTER :: ndiag_term
   END TYPE qs_kpp1_env_type
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief just to build array of pointers
 !> \param kpp1_env: the pointer to the kpp1_env
 !> \par History
 !>      12.2002 created [fawzi]
 !> \author Fawzi Mohamed
-! *****************************************************************************
-  TYPE qs_kpp1_env_p_type
-     TYPE(qs_kpp1_env_type), POINTER :: kpp1_env
-  END TYPE qs_kpp1_env_p_type
+! **************************************************************************************************
+   TYPE qs_kpp1_env_p_type
+      TYPE(qs_kpp1_env_type), POINTER :: kpp1_env
+   END TYPE qs_kpp1_env_p_type
 
 CONTAINS
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief releases a kpp1_env (see doc/ReferenceCounting.html)
 !> \param kpp1_env the environement to release
 !> \par History
 !>      07.2002 created [fawzi]
 !> \author Fawzi Mohamed
-! *****************************************************************************
-  SUBROUTINE kpp1_release(kpp1_env)
-    TYPE(qs_kpp1_env_type), POINTER          :: kpp1_env
+! **************************************************************************************************
+   SUBROUTINE kpp1_release(kpp1_env)
+      TYPE(qs_kpp1_env_type), POINTER                    :: kpp1_env
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'kpp1_release', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'kpp1_release', routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: ispin
+      INTEGER                                            :: ispin
 
     IF (ASSOCIATED(kpp1_env)) THEN
        CPASSERT(kpp1_env%ref_count>0)
@@ -146,22 +145,21 @@ CONTAINS
     NULLIFY(kpp1_env)
   END SUBROUTINE kpp1_release
 
-! *****************************************************************************
+! **************************************************************************************************
 !> \brief retains a kpp1_env (see doc/ReferenceCounting.html)
 !> \param kpp1_env the environement to retain
 !> \par History
 !>      11.2002 created [fawzi]
 !> \author Fawzi Mohamed
-! *****************************************************************************
-  SUBROUTINE kpp1_retain(kpp1_env)
-    TYPE(qs_kpp1_env_type), POINTER          :: kpp1_env
+! **************************************************************************************************
+   SUBROUTINE kpp1_retain(kpp1_env)
+      TYPE(qs_kpp1_env_type), POINTER                    :: kpp1_env
 
-    CHARACTER(len=*), PARAMETER :: routineN = 'kpp1_retain', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(len=*), PARAMETER :: routineN = 'kpp1_retain', routineP = moduleN//':'//routineN
 
-    CPASSERT(ASSOCIATED(kpp1_env))
-    CPASSERT(kpp1_env%ref_count>0)
-    kpp1_env%ref_count=kpp1_env%ref_count+1
-  END SUBROUTINE kpp1_retain
+      CPASSERT(ASSOCIATED(kpp1_env))
+      CPASSERT(kpp1_env%ref_count > 0)
+      kpp1_env%ref_count = kpp1_env%ref_count+1
+   END SUBROUTINE kpp1_retain
 
 END MODULE qs_kpp1_env_types

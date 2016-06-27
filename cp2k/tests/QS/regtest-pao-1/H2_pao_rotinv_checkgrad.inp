@@ -23,6 +23,7 @@
         PARAMETERIZATION ROTINV
         NUM_GRADIENT_ORDER 2
         CHECK_GRADIENT_TOL 1.0E-6
+        LINPOT_INITGUESS_DELTA 0.1
         &LINE_SEARCH
           METHOD 3PNT
         &END LINE_SEARCH
@@ -51,7 +52,14 @@
       POTENTIAL GTH-PBE
       PAO_BASIS_SIZE 1
       &PAO_POTENTIAL
+        MAXL 4
+        BETA 1.2
+        WEIGHT 2.0 ! improves numeric gradient
+      &END PAO_POTENTIAL
+      &PAO_POTENTIAL
         MAXL 0
+        BETA 0.8
+        WEIGHT 2.0 ! improves numeric gradient
       &END PAO_POTENTIAL
     &END KIND
     &TOPOLOGY

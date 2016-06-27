@@ -23,14 +23,12 @@
     INTEGER                                  :: displ, left, &
                                                 msglen, myrank, nprocs, &
                                                 right, tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierror = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     CALL mpi_comm_rank(group,myrank,ierror)
     IF ( ierror /= 0 ) CALL mp_stop ( ierror, "mpi_comm_rank @ "//routineN )
     CALL mpi_comm_size(group,nprocs,ierror)
@@ -46,11 +44,10 @@
     msglen = SIZE(msg)
     t_start = m_walltime ( )
     CALL mpi_sendrecv_replace(msg,msglen,MPI_INTEGER,right,tag,left,tag, &
-         group,status,ierror)
-    t_end = m_walltime ( )
+         group,MPI_STATUS_IGNORE,ierror)
     IF ( ierror /= 0 ) CALL mp_stop ( ierror, "mpi_sendrecv_replace @ "//routineN )
+    t_end = m_walltime ( )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,msg_size=msglen*int_4_size)
-    DEALLOCATE(status)
 #else
     MARK_USED(msg)
     MARK_USED(group)
@@ -86,14 +83,12 @@
     INTEGER                                  :: displ, left, &
                                                 msglen, myrank, nprocs, &
                                                 right, tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierror = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     CALL mpi_comm_rank(group,myrank,ierror)
     IF ( ierror /= 0 ) CALL mp_stop ( ierror, "mpi_comm_rank @ "//routineN )
     CALL mpi_comm_size(group,nprocs,ierror)
@@ -109,11 +104,9 @@
     msglen = SIZE(msg)
     t_start = m_walltime ( )
     CALL mpi_sendrecv_replace(msg,msglen,MPI_INTEGER,right,tag,left,&
-         tag,group,status,ierror)
-    t_end = m_walltime ( )
+         tag,group,MPI_STATUS_IGNORE,ierror)
     IF ( ierror /= 0 ) CALL mp_stop ( ierror, "mpi_sendrecv_replace @ "//routineN )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,msg_size=msglen*int_4_size)
-    DEALLOCATE(status)
 #else
     MARK_USED(msg)
     MARK_USED(group)
@@ -1501,6 +1494,156 @@
   END SUBROUTINE mp_scatter_iv
 
 ! *****************************************************************************
+!> \brief Scatters data from one processes to all others
+!> \param[in] msg_scatter     Data to scatter (for root process)
+!> \param[in] root            Process which scatters data
+!> \param[in] gid             Message passing environment identifier
+!> \par MPI mapping
+!>      mpi_scatter
+! *****************************************************************************
+  SUBROUTINE mp_iscatter_i(msg_scatter,msg,root,gid,request)
+    INTEGER(KIND=int_4), INTENT(IN)                      :: msg_scatter(:)
+    INTEGER(KIND=int_4), INTENT(INOUT)                   :: msg
+    INTEGER, INTENT(IN)                      :: root, gid
+    INTEGER, INTENT(INOUT)                   :: request
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'mp_iscatter_i', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: handle, ierr, msglen
+
+    ierr = 0
+    CALL mp_timeset(routineN,handle)
+
+    msglen = 1
+#if defined(__parallel)
+#if __MPI_VERSION > 2
+    t_start = m_walltime ( )
+    CALL mpi_iscatter(msg_scatter,msglen,MPI_INTEGER,msg,&
+         msglen,MPI_INTEGER,root,gid,request,ierr)
+    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_iscatter @ "//routineN )
+    t_end = m_walltime ( )
+    CALL add_perf(perf_id=4,count=1,time=t_end-t_start,msg_size=1*int_4_size)
+#else
+    MARK_USED(msg_scatter)
+    MARK_USED(msg)
+    MARK_USED(root)
+    MARK_USED(gid)
+    request = mp_request_null
+    CPABORT("mp_iscatter requires MPI-3 standard")
+#endif
+#else
+    MARK_USED(root)
+    MARK_USED(gid)
+    msg = msg_scatter(1)
+    request = mp_request_null
+#endif
+    CALL mp_timestop(handle)
+  END SUBROUTINE mp_iscatter_i
+
+! *****************************************************************************
+!> \brief Scatters data from one processes to all others
+!> \param[in] msg_scatter     Data to scatter (for root process)
+!> \param[in] root            Process which scatters data
+!> \param[in] gid             Message passing environment identifier
+!> \par MPI mapping
+!>      mpi_scatter
+! *****************************************************************************
+  SUBROUTINE mp_iscatter_iv(msg_scatter,msg,root,gid,request)
+    INTEGER(KIND=int_4), INTENT(IN)                      :: msg_scatter(:)
+    INTEGER(KIND=int_4), INTENT(INOUT)                   :: msg(:)
+    INTEGER, INTENT(IN)                      :: root, gid
+    INTEGER, INTENT(INOUT)                   :: request
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'mp_iscatter_iv', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: handle, ierr, msglen
+
+    ierr = 0
+    CALL mp_timeset(routineN,handle)
+
+    msglen = SIZE(msg)
+#if defined(__parallel)
+#if __MPI_VERSION > 2
+    t_start = m_walltime ( )
+    CALL mpi_iscatter(msg_scatter,msglen,MPI_INTEGER,msg,&
+         msglen,MPI_INTEGER,root,gid,request,ierr)
+    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_iscatter @ "//routineN )
+    t_end = m_walltime ( )
+    CALL add_perf(perf_id=4,count=1,time=t_end-t_start,msg_size=1*int_4_size)
+#else
+    MARK_USED(msg_scatter)
+    MARK_USED(msg)
+    MARK_USED(root)
+    MARK_USED(gid)
+    request = mp_request_null
+    CPABORT("mp_iscatter requires MPI-3 standard")
+#endif
+#else
+    MARK_USED(root)
+    MARK_USED(gid)
+    msg = msg_scatter
+    request = mp_request_null
+#endif
+    CALL mp_timestop(handle)
+  END SUBROUTINE mp_iscatter_iv
+
+! *****************************************************************************
+!> \brief Scatters data from one processes to all others
+!> \param[in] msg_scatter     Data to scatter (for root process)
+!> \param[in] root            Process which scatters data
+!> \param[in] gid             Message passing environment identifier
+!> \par MPI mapping
+!>      mpi_scatter
+! *****************************************************************************
+  SUBROUTINE mp_iscatterv_iv(msg_scatter,sendcounts,displs,msg,recvcount,root,gid,request)
+    INTEGER(KIND=int_4), INTENT(IN)                      :: msg_scatter(:)
+    INTEGER, INTENT(IN)                      :: sendcounts(:), displs(:)
+    INTEGER(KIND=int_4), INTENT(INOUT)                   :: msg(:)
+    INTEGER, INTENT(IN)                      :: recvcount, root, gid
+    INTEGER, INTENT(INOUT)                   :: request
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'mp_iscatterv_iv', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: handle, ierr
+
+    ierr = 0
+    CALL mp_timeset(routineN,handle)
+
+#if defined(__parallel)
+#if __MPI_VERSION > 2
+    t_start = m_walltime ( )
+    CALL mpi_iscatterv(msg_scatter,sendcounts,displs,MPI_INTEGER,msg,&
+         recvcount,MPI_INTEGER,root,gid,request,ierr)
+    IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_iscatterv @ "//routineN )
+    t_end = m_walltime ( )
+    CALL add_perf(perf_id=4,count=1,time=t_end-t_start,msg_size=1*int_4_size)
+#else
+    MARK_USED(msg_scatter)
+    MARK_USED(sendcounts)
+    MARK_USED(displs)
+    MARK_USED(msg)
+    MARK_USED(recvcount)
+    MARK_USED(root)
+    MARK_USED(gid)
+    request = mp_request_null
+    CPABORT("mp_iscatterv requires MPI-3 standard")
+#endif
+#else
+    MARK_USED(sendcounts)
+    MARK_USED(displs)
+    MARK_USED(recvcount)
+    MARK_USED(root)
+    MARK_USED(gid)
+    msg(1:recvcount) = msg_scatter(1+displs(1):1+displs(1)+sendcounts(1))
+    request = mp_request_null
+#endif
+    CALL mp_timestop(handle)
+  END SUBROUTINE mp_iscatterv_iv
+
+! *****************************************************************************
 !> \brief Gathers a datum from all processes to one
 !> \param[in] msg             Datum to send to root
 !> \param[out] msg_gather     Received data (on root)
@@ -1533,7 +1676,7 @@
 #else
     MARK_USED(root)
     MARK_USED(gid)
-    msg_gather = msg
+    msg_gather(1) = msg
 #endif
     CALL mp_timestop(handle)
   END SUBROUTINE mp_gather_i
@@ -1673,6 +1816,70 @@
 #endif
     CALL mp_timestop(handle)
   END SUBROUTINE mp_gatherv_iv
+
+! *****************************************************************************
+!> \brief Gathers data from all processes to one.
+!> \param[in] sendbuf         Data to send to root
+!> \param[out] recvbuf        Received data (on root)
+!> \param[in] recvcounts      Sizes of data received from processes
+!> \param[in] displs          Offsets of data received from processes
+!> \param[in] root            Process which gathers the data
+!> \param[in] comm            Message passing environment identifier
+!> \par Data length
+!>      Data can have different lengths
+!> \par Offsets
+!>      Offsets start at 0
+!> \par MPI mapping
+!>      mpi_gather
+! *****************************************************************************
+  SUBROUTINE mp_igatherv_iv(sendbuf,sendcount,recvbuf,recvcounts,displs,root,comm,request)
+    INTEGER(KIND=int_4), DIMENSION(:), INTENT(IN)        :: sendbuf
+    INTEGER(KIND=int_4), DIMENSION(:), INTENT(OUT)       :: recvbuf
+    INTEGER, DIMENSION(:), INTENT(IN)        :: recvcounts, displs
+    INTEGER, INTENT(IN)                      :: sendcount, root, comm
+    INTEGER, INTENT(INOUT)                   :: request
+
+    CHARACTER(len=*), PARAMETER :: routineN = 'mp_igatherv_iv', &
+      routineP = moduleN//':'//routineN
+
+    INTEGER                                  :: handle, ierr
+
+    ierr = 0
+    CALL mp_timeset(routineN,handle)
+
+#if defined(__parallel)
+#if __MPI_VERSION > 2
+    t_start = m_walltime()
+    CALL mpi_igatherv(sendbuf,sendcount,MPI_INTEGER,&
+         recvbuf,recvcounts,displs,MPI_INTEGER,&
+         root,comm,request,ierr)
+    IF (ierr /= 0) CALL mp_stop(ierr,"mpi_gatherv @ "//routineN)
+    t_end = m_walltime()
+    CALL add_perf(perf_id=4,&
+         count=1,&
+         time=t_end-t_start,&
+         msg_size=sendcount*int_4_size)
+#else
+    MARK_USED(sendbuf)
+    MARK_USED(sendcount)
+    MARK_USED(recvbuf)
+    MARK_USED(recvcounts)
+    MARK_USED(displs)
+    MARK_USED(root)
+    MARK_USED(comm)
+    request = mp_request_null
+    CPABORT("mp_igatherv requires MPI-3 standard")
+#endif
+#else
+    MARK_USED(sendcount)
+    MARK_USED(recvcounts)
+    MARK_USED(root)
+    MARK_USED(comm)
+    recvbuf(1+displs(1):1+displs(1)+recvcounts(1)) = sendbuf(1:sendcount)
+    request = mp_request_null
+#endif
+    CALL mp_timestop(handle)
+  END SUBROUTINE mp_igatherv_iv
 
 
 ! *****************************************************************************
@@ -2189,27 +2396,23 @@
 #if defined(__parallel)
     INTEGER                                  :: msglen_in, msglen_out, &
                                                 recv_tag, send_tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierr = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     t_start = m_walltime ( )
     msglen_in = SIZE(msgin)
     msglen_out = SIZE(msgout)
     send_tag = 0 ! cannot think of something better here, this might be dangerous
     recv_tag = 0 ! cannot think of something better here, this might be dangerous
     CALL mpi_sendrecv(msgin,msglen_in,MPI_INTEGER,dest,send_tag,msgout,&
-         msglen_out,MPI_INTEGER,source,recv_tag,comm,status,ierr)
-    ! we do not check the status
+         msglen_out,MPI_INTEGER,source,recv_tag,comm,MPI_STATUS_IGNORE,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_sendrecv @ "//routineN )
     t_end = m_walltime ( )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,&
          msg_size=(msglen_in+msglen_out)*int_4_size/2)
-    DEALLOCATE(status)
 #else
     MARK_USED(dest)
     MARK_USED(source)
@@ -2241,27 +2444,23 @@
 #if defined(__parallel)
     INTEGER                                  :: msglen_in, msglen_out, &
                                                 recv_tag, send_tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierr = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     t_start = m_walltime ( )
     msglen_in = SIZE(msgin,1)*SIZE(msgin,2)
     msglen_out = SIZE(msgout,1)*SIZE(msgout,2)
     send_tag = 0 ! cannot think of something better here, this might be dangerous
     recv_tag = 0 ! cannot think of something better here, this might be dangerous
     CALL mpi_sendrecv(msgin,msglen_in,MPI_INTEGER,dest,send_tag,msgout,&
-         msglen_out,MPI_INTEGER,source,recv_tag,comm,status,ierr)
-    ! we do not check the status
+         msglen_out,MPI_INTEGER,source,recv_tag,comm,MPI_STATUS_IGNORE,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_sendrecv @ "//routineN )
     t_end = m_walltime ( )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,&
          msg_size=(msglen_in+msglen_out)*int_4_size/2)
-    DEALLOCATE(status)
 #else
     MARK_USED(dest)
     MARK_USED(source)
@@ -2293,27 +2492,23 @@
 #if defined(__parallel)
     INTEGER                                  :: msglen_in, msglen_out, &
                                                 recv_tag, send_tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierr = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     t_start = m_walltime ( )
     msglen_in = SIZE(msgin)
     msglen_out = SIZE(msgout)
     send_tag = 0 ! cannot think of something better here, this might be dangerous
     recv_tag = 0 ! cannot think of something better here, this might be dangerous
     CALL mpi_sendrecv(msgin,msglen_in,MPI_INTEGER,dest,send_tag,msgout,&
-         msglen_out,MPI_INTEGER,source,recv_tag,comm,status,ierr)
-    ! we do not check the status
+         msglen_out,MPI_INTEGER,source,recv_tag,comm,MPI_STATUS_IGNORE,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_sendrecv @ "//routineN )
     t_end = m_walltime ( )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,&
          msg_size=(msglen_in+msglen_out)*int_4_size/2)
-    DEALLOCATE(status)
 #else
     MARK_USED(dest)
     MARK_USED(source)
@@ -2345,27 +2540,23 @@
 #if defined(__parallel)
     INTEGER                                  :: msglen_in, msglen_out, &
                                                 recv_tag, send_tag
-    INTEGER, ALLOCATABLE, DIMENSION(:)       :: status
 #endif
 
     ierr = 0
     CALL mp_timeset(routineN,handle)
 
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
     t_start = m_walltime ( )
     msglen_in = SIZE(msgin)
     msglen_out = SIZE(msgout)
     send_tag = 0 ! cannot think of something better here, this might be dangerous
     recv_tag = 0 ! cannot think of something better here, this might be dangerous
     CALL mpi_sendrecv(msgin,msglen_in,MPI_INTEGER,dest,send_tag,msgout,&
-         msglen_out,MPI_INTEGER,source,recv_tag,comm,status,ierr)
-    ! we do not check the status
+         msglen_out,MPI_INTEGER,source,recv_tag,comm,MPI_STATUS_IGNORE,ierr)
     IF ( ierr /= 0 ) CALL mp_stop( ierr, "mpi_sendrecv @ "//routineN )
     t_end = m_walltime ( )
     CALL add_perf(perf_id=7,count=1,time=t_end-t_start,&
          msg_size=(msglen_in+msglen_out)*int_4_size/2)
-    DEALLOCATE(status)
 #else
     MARK_USED(dest)
     MARK_USED(source)
@@ -2575,6 +2766,7 @@
     MARK_USED(request)
     MARK_USED(tag)
     ierr=1
+    request=0
     CALL mp_stop( ierr, "mp_isend called in non parallel case" )
 #endif
     CALL mp_timestop(handle)
@@ -2640,6 +2832,7 @@
     MARK_USED(request)
     MARK_USED(tag)
     ierr=1
+    request=0
     CALL mp_stop( ierr, "mp_isend called in non parallel case" )
 #endif
     CALL mp_timestop(handle)
@@ -2710,6 +2903,7 @@
     MARK_USED(request)
     MARK_USED(tag)
     ierr=1
+    request=0
     CALL mp_stop( ierr, "mp_isend called in non parallel case" )
 #endif
     CALL mp_timestop(handle)
@@ -2773,6 +2967,7 @@
     MARK_USED(comm)
     MARK_USED(request)
     MARK_USED(tag)
+    request=0
 #endif
     CALL mp_timestop(handle)
   END SUBROUTINE mp_irecv_iv
@@ -2836,6 +3031,7 @@
     MARK_USED(comm)
     MARK_USED(request)
     MARK_USED(tag)
+    request=0
     CPABORT("mp_irecv called in non parallel case")
 #endif
     CALL mp_timestop(handle)
@@ -2905,6 +3101,7 @@
     MARK_USED(comm)
     MARK_USED(request)
     MARK_USED(tag)
+    request=0
     CPABORT("mp_irecv called in non parallel case")
 #endif
     CALL mp_timestop(handle)
@@ -3210,19 +3407,14 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr, msg_len
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
     msg_len = SIZE(msg)
     IF (PRESENT(msglen)) msg_len = msglen
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_WRITE_AT(fh, offset, msg, msg_len, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_WRITE_AT(fh, offset, msg, msg_len, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_write_at_iv @ "//routineN)
-    DEALLOCATE(status)
 #else
     WRITE(UNIT=fh, POS=offset+1) msg(1:msg_len)
 #endif
@@ -3243,17 +3435,12 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_WRITE_AT(fh, offset, msg, 1, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_WRITE_AT(fh, offset, msg, 1, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_write_at_i @ "//routineN)
-    DEALLOCATE(status)
 #else
     WRITE(UNIT=fh, POS=offset+1) msg
 #endif
@@ -3280,19 +3467,14 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
     msg_len = SIZE(msg)
     IF (PRESENT(msglen)) msg_len = msglen
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_WRITE_AT_ALL(fh, offset, msg, msg_len, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_WRITE_AT_ALL(fh, offset, msg, msg_len, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_write_at_all_iv @ "//routineN)
-    DEALLOCATE(status)
 #else
     WRITE(UNIT=fh, POS=offset+1) msg(1:msg_len)
 #endif
@@ -3313,17 +3495,12 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_WRITE_AT_ALL(fh, offset, msg, 1, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_WRITE_AT_ALL(fh, offset, msg, 1, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_write_at_all_i @ "//routineN)
-    DEALLOCATE(status)
 #else
     WRITE(UNIT=fh, POS=offset+1) msg
 #endif
@@ -3351,19 +3528,14 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
     msg_len = SIZE(msg)
     IF (PRESENT(msglen)) msg_len = msglen
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_READ_AT(fh, offset, msg, msg_len, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_READ_AT(fh, offset, msg, msg_len, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_read_at_iv @ "//routineN)
-    DEALLOCATE(status)
 #else
     READ(UNIT=fh, POS=offset+1) msg(1:msg_len)
 #endif
@@ -3385,17 +3557,12 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_READ_AT(fh, offset, msg, 1, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_READ_AT(fh, offset, msg, 1, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_read_at_i @ "//routineN)
-    DEALLOCATE(status)
 #else
     READ(UNIT=fh, POS=offset+1) msg
 #endif
@@ -3421,19 +3588,14 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr, msg_len
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
     msg_len = SIZE(msg)
     IF (PRESENT(msglen)) msg_len = msglen
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_READ_AT_ALL(fh, offset, msg, msg_len, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_READ_AT_ALL(fh, offset, msg, msg_len, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_read_at_all_iv @ "//routineN)
-    DEALLOCATE(status)
 #else
     READ(UNIT=fh, POS=offset+1) msg(1:msg_len)
 #endif
@@ -3454,17 +3616,12 @@
                                    routineP = moduleN//':'//routineN
 
     INTEGER                                    :: ierr
-#if defined(__parallel)
-    INTEGER, ALLOCATABLE, DIMENSION(:)         :: status
-#endif
 
     ierr = 0
 #if defined(__parallel)
-    ALLOCATE(status(MPI_STATUS_SIZE))
-    CALL MPI_FILE_READ_AT_ALL(fh, offset, msg, 1, MPI_INTEGER, status, ierr)
+    CALL MPI_FILE_READ_AT_ALL(fh, offset, msg, 1, MPI_INTEGER, MPI_STATUS_IGNORE, ierr)
     IF (ierr .NE. 0)&
        CPABORT("mpi_file_read_at_all_i @ "//routineN)
-    DEALLOCATE(status)
 #else
     READ(UNIT=fh, POS=offset+1) msg
 #endif

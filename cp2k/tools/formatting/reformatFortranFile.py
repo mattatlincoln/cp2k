@@ -71,12 +71,12 @@ CASE_RE = re.compile(SOL_STR + r"CASE\s*(\(.+\)|DEFAULT)" + EOL_STR, RE_FLAGS)
 ENDSEL_RE = re.compile(SOL_STR + r"END\s*SELECT" + EOL_STR, RE_FLAGS)
 
 SUBR_RE = re.compile(
-    r"^[^\"'!]*SUBROUTINE\s+\w+\s*(\(.*\))?" + EOL_STR, RE_FLAGS)
+    r"^([^\"'!]* )?SUBROUTINE\s+\w+\s*(\(.*\))?" + EOL_STR, RE_FLAGS)
 ENDSUBR_RE = re.compile(
     SOL_STR + r"END\s*SUBROUTINE(\s+\w+)?" + EOL_STR, RE_FLAGS)
 
 FCT_RE = re.compile(
-    r"^[^\"'!]*FUNCTION\s+\w+\s*(\(.*\))?(\s*RESULT\s*\(\w+\))?" + EOL_STR, RE_FLAGS)
+    r"^([^\"'!]* )?FUNCTION\s+\w+\s*(\(.*\))?(\s*RESULT\s*\(\w+\))?" + EOL_STR, RE_FLAGS)
 ENDFCT_RE = re.compile(
     SOL_STR + r"END\s*FUNCTION(\s+\w+)?" + EOL_STR, RE_FLAGS)
 
@@ -91,7 +91,7 @@ PROG_RE = re.compile(SOL_STR + r"PROGRAM\s+\w+" + EOL_STR, RE_FLAGS)
 ENDPROG_RE = re.compile(
     SOL_STR + r"END\s*PROGRAM(\s+\w+)?" + EOL_STR, RE_FLAGS)
 
-INTERFACE_RE = re.compile(SOL_STR + r"INTERFACE(\s+\w+)?" + EOL_STR, RE_FLAGS)
+INTERFACE_RE = re.compile(r"^([^\"'!]* )?INTERFACE(\s+\w+)?" + EOL_STR, RE_FLAGS)
 ENDINTERFACE_RE = re.compile(
     SOL_STR + r"END\s*INTERFACE(\s+\w+)?" + EOL_STR, RE_FLAGS)
 
@@ -472,14 +472,16 @@ def format_single_fline(f_line, whitespace, linebreak_pos, ampersand_sep, filena
     line_ftd = ''
     pos_prev = -1
     for pos, char in CharFilter(enumerate(line)):
-        is_decl = line[pos:].lstrip().startswith('::') or line[:pos].rstrip().endswith('::')
+        is_decl = line[pos:].lstrip().startswith('::') or line[
+            :pos].rstrip().endswith('::')
         if char == ' ':
-            if line_ftd and (re.search(r'[\w"]',line_ftd[-1]) or is_decl): # remove double spaces
+            # remove double spaces
+            if line_ftd and (re.search(r'[\w"]', line_ftd[-1]) or is_decl):
                 line_ftd = line_ftd + char
         else:
-            if line_ftd and line_ftd[-1]==' ' and (not re.search(r'[\w"]',char) and not is_decl):
-                line_ftd = line_ftd[:-1] # remove spaces except between words
-            line_ftd = line_ftd + line[pos_prev+1:pos+1]
+            if line_ftd and line_ftd[-1] == ' ' and (not re.search(r'[\w"]', char) and not is_decl):
+                line_ftd = line_ftd[:-1]  # remove spaces except between words
+            line_ftd = line_ftd + line[pos_prev + 1:pos + 1]
         pos_prev = pos
     line = line_ftd
 
@@ -588,10 +590,6 @@ def format_single_fline(f_line, whitespace, linebreak_pos, ampersand_sep, filena
     str_end = -1
     instring = ''
     for pos, char in enumerate(line):
-        if not instring and char == '!':  # skip comments
-            line_parts.append(line[str_end + 1:pos])
-            line_parts.append(line[pos:])
-            break
         if char == '"' or char == "'":  # skip string
             if not instring:
                 str_start = pos
@@ -615,8 +613,8 @@ def format_single_fline(f_line, whitespace, linebreak_pos, ampersand_sep, filena
 
     # format ':' for labels
     for newre in NEW_SCOPE_RE[0:2]:
-      if newre.search(line) and re.search(SOL_STR+r"\w+\s*:", line):
-           line = ': '.join(_.strip() for _ in line.split(':',1))
+        if newre.search(line) and re.search(SOL_STR + r"\w+\s*:", line):
+            line = ': '.join(_.strip() for _ in line.split(':', 1))
 
     if not auto_format:
         line = line_orig
@@ -706,7 +704,7 @@ def reformat_ffile(infile, outfile, logFile=sys.stdout, indent_size=2, whitespac
             has_comment = bool(comment.strip())
             sep = has_comment and not comment.strip() == line.strip()
             if line.strip():  # empty lines between linebreaks are ignored
-                comment_lines.append(' ' * sep + comment.rstrip(' \n'))
+                comment_lines.append(' ' * sep + comment.strip())
 
         orig_lines = lines
         nfl += 1
@@ -845,24 +843,31 @@ def reformat_ffile(infile, outfile, logFile=sys.stdout, indent_size=2, whitespac
                  for l in lines]  # deleting trailing whitespaces
 
         for ind, line, orig_line in zip(indent, lines, orig_lines):
+            # get actual line length excluding comment:
+            line_length = 0
+            for line_length, _ in CharFilter(enumerate(line)):
+                pass
+            line_length += 1
+
             if do_indent:
                 ind_use = ind
             else:
                 ind_use = 1
-            if ind_use + len(line) <= 133:
+            if ind_use + line_length <= 133:  # 132 plus 1 newline char
                 outfile.write('!$' * is_omp_conditional + ' ' *
                               (ind_use - 2 * is_omp_conditional +
                                len(line) - len(line.lstrip(' '))) + line.lstrip(' '))
-            elif len(line) <= 133:
+            elif line_length <= 133:
                 outfile.write('!$' * is_omp_conditional + ' ' *
                               (133 - 2 * is_omp_conditional -
                                len(line.lstrip(' '))) + line.lstrip(' '))
-                logFile.write("*** " + orig_filename + ":" + str(stream.line_nr) +
-                              ": auto indentation failed due to 132 chars limit. ***\n")
+                if not typeRe.match(f_line):
+                    logFile.write("*** " + orig_filename + ":" + str(stream.line_nr) +
+                                  ": auto indentation failed due to 132 chars limit, line should be splitted. ***\n")
             else:
                 outfile.write(orig_line)
                 logFile.write("*** " + orig_filename + ":" + str(stream.line_nr) +
-                              (": auto indentation and whitespace formatting failed due to 132 chars limit. ***\n"))
+                              (": auto indentation and whitespace formatting failed due to 132 chars limit, line should be splitted. ***\n"))
             if debug:
                 print(' ' * ind_use + line)
         # no indentation of blank lines
@@ -874,29 +879,13 @@ def reformat_ffile(infile, outfile, logFile=sys.stdout, indent_size=2, whitespac
         # rm subsequent blank lines
         skip_blank = is_empty and not any(comments)
 
-
-if __name__ == '__main__':
-    import os.path
-    # is executable only for debugging purposes
-    # must be executed from ../ with python -m formatting/reformatFortranFile
-    if len(sys.argv) < 2:
-        print("usage:", sys.argv[0], " out_dir file1 [file2 ...]")
-        sys.exit(1)
-
-    outDir = sys.argv[1]
-    if not os.path.isdir(outDir):
-        print("out_dir must be a directory")
-        print("usage:", sys.argv[0], " out_dir file1 [file2 ...]")
-        sys.exit(1)
-
-    for fileName in sys.argv[2:]:
-        try:
-            print("reformatting", fileName)
-            infile = open(fileName, 'r')
-            outfile = open(os.path.join(outDir, os.path.basename(fileName)), 'w')
-            reformat_ffile(infile, outfile)
-        except:
-            print("error for file", fileName)
-            raise
+try:
+    any
+except NameError:
+    def any(iterable):
+        for element in iterable:
+            if element:
+                return True
+        return False
 
 # EOF

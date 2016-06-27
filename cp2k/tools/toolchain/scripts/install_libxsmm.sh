@@ -35,6 +35,7 @@ EOF
                 download_pkg_no_checksum ${DOWNLOADER_FLAGS} \
                                          -o libxsmm-master.zip \
                                          https://github.com/hfp/libxsmm/archive/master.zip
+                [ -d libxsmm-master ] && rm -rf libxsmm-master
                 unzip -q -o libxsmm-master.zip
             else
                 if [ -f libxsmm-${libxsmm_ver}.tar.gz ] ; then
@@ -42,8 +43,9 @@ EOF
                 else
                     download_pkg ${DOWNLOADER_FLAGS} \
                                  https://www.cp2k.org/static/downloads/libxsmm-${libxsmm_ver}.tar.gz
-                    tar -xzf libxsmm-${libxsmm_ver}.tar.gz
                 fi
+                [ -d libxsmm-${libxsmm_ver} ] && rm -rf libxsmm-${libxsmm_ver}
+                tar -xzf libxsmm-${libxsmm_ver}.tar.gz
             fi
             echo "Installing from scratch into ${pkg_install_dir}"
             # note that we do not have to set -L flags to ld for the
@@ -83,6 +85,7 @@ EOF
         echo "==================== Finding Libxsmm from system paths ===================="
         check_command libxsmm_generator "libxsmm"
         check_lib -lxsmm "libxsmm"
+        check_lib -lxsmmf "libxsmm"
         add_include_from_paths LIBXSMM_CFLAGS "libxsmm.h" $INCLUDE_PATHS
         add_lib_from_paths LIBXSMM_LDFLAGS "libxsmm.*" $LIB_PATHS
         ;;
@@ -99,7 +102,7 @@ EOF
         ;;
 esac
 if [ "$with_libxsmm" != "__DONTUSE__" ] ; then
-    LIBXSMM_LIBS="-lxmm"
+    LIBXSMM_LIBS="-lxsmmf -lxsmm"
     if [ "$with_libxsmm" != "__SYSTEM__" ] ; then
         cat <<EOF > "${BUILDDIR}/setup_libxsmm"
 prepend_path PATH "${pkg_install_dir}/bin"
@@ -116,7 +119,7 @@ export LIBXSMM_LIBS="${LIBXSMM_LIBS}"
 export CP_DFLAGS="-D__LIBXSMM \${CP_DFLAGS}"
 export CP_CFLAGS="\${CP_CFLAGS} ${LIBXSMM_CFLAGS}"
 export CP_LDFLAGS="\${CP_LDFLAGS} ${LIBXSMM_LDFLAGS}"
-export CP_LIBS="-lxsmm \${CP_LIBS}"
+export CP_LIBS="\${LIBXSMM_LIBS} \${CP_LIBS}"
 EOF
 fi
 cd "${ROOTDIR}"
