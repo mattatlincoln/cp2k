@@ -19,7 +19,12 @@
 #define __LOCATION__ cp__l(__SHORT_FILE__,__LINE__)
 #define CPWARN(msg) CALL cp__w(__SHORT_FILE__,__LINE__,msg)
 #define CPABORT(msg) CALL cp__b(__SHORT_FILE__,__LINE__,msg)
-#define CPASSERT(cond) IF(.NOT.(cond))CALL cp__a(__SHORT_FILE__,__LINE__)
+
+#if !defined(NDEBUG)
+# define CPASSERT(cond) IF(.NOT.(cond))CALL cp__a(__SHORT_FILE__,__LINE__)
+#else
+# define CPASSERT(cond)
+#endif
 
 ! The MARK_USED macro can be used to mark an argument/variable as used.
 ! It is intended to make it possible to switch on -Werror=unused-dummy-argument,
