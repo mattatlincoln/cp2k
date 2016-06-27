@@ -1009,7 +1009,7 @@ CONTAINS
              CALL integrate_four_center(qs_env,matrix_h,energy,rho_ao_orb,hfx_sections,&
                                         para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
                                         ispin=ispin)
-             write(6,*)"hfx transition density energy", energy%ex
+             !write(6,*)"hfx transition density energy", energy%ex
 
           END DO
        END DO
