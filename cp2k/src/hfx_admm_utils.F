@@ -957,9 +957,8 @@ CONTAINS
     LOGICAL :: distribute_fock_matrix,&
       hfx_treat_lsd_in_core, s_mstruct_changed, do_hfx
     TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
-      POINTER                                :: matrix_h, &
-                                                matrix_ks,&
-                                                rho_ao_orb
+      POINTER                                :: rho_ao_orb,&
+                                                matrix_v_hfx_2d
     TYPE(cp_para_env_type), POINTER          :: para_env
     TYPE(dft_control_type), POINTER          :: dft_control
     TYPE(pw_env_type), POINTER               :: pw_env
@@ -970,14 +969,12 @@ CONTAINS
 
     NULLIFY(dft_control, hfx_sections, input, &
          para_env, poisson_env, pw_env, &
-         matrix_h, matrix_ks, rho_ao_orb)
+         rho_ao_orb, matrix_v_hfx_2d)
 
     CALL get_qs_env(qs_env=qs_env,&
          dft_control=dft_control,&
          energy=energy,&
          input=input,&
-         matrix_h_kp=matrix_h,&
-         matrix_ks_kp=matrix_ks,&
          para_env=para_env,&
          pw_env=pw_env,&
          s_mstruct_changed=s_mstruct_changed)
@@ -999,23 +996,18 @@ CONTAINS
        mspin=1
        IF ( hfx_treat_lsd_in_core ) mspin=nspins
 
+       matrix_v_hfx_2d(1:nspins, 1:1) => kpp1_env%v_hfx(1:nspins)
+
        DO irep = 1,n_rep_hf
        
           CALL qs_rho_get(rho_struct=rho,rho_ao_kp=rho_ao_orb)
 
           ! the real hfx calulation
           DO ispin = 1,mspin
-             
-             CALL cp_dbcsr_set(matrix_h(1,1)%matrix,0.0_dp)
-             CALL cp_dbcsr_copy(matrix_h(1,1)%matrix, matrix_ks(ispin,1)%matrix)
-             CALL cp_dbcsr_set(matrix_ks(ispin,1)%matrix,0.0_dp)
              energy%ex = 0.0
-             CALL integrate_four_center(qs_env,matrix_ks,energy,rho_ao_orb,hfx_sections,&
+             CALL integrate_four_center(qs_env,matrix_v_hfx_2d,energy,rho_ao_orb,hfx_sections,&
                                         para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
                                         ispin=ispin)
-             CALL cp_dbcsr_copy(kpp1_env%v_hfx(ispin)%matrix, matrix_ks(ispin,1)%matrix)    
-             CALL cp_dbcsr_copy(matrix_ks(ispin,1)%matrix, matrix_h(1,1)%matrix)
-             !write(6,*)"hfx transition density energy", energy%ex
 
           END DO
        END DO
