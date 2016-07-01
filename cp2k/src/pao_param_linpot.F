@@ -16,15 +16,18 @@ MODULE pao_param_linpot
         cp_dbcsr_iterator_next_block, cp_dbcsr_iterator_start, cp_dbcsr_iterator_stop, &
         cp_dbcsr_p_type, cp_dbcsr_release, cp_dbcsr_reserve_diag_blocks, cp_dbcsr_row_block_sizes, &
         cp_dbcsr_type, dbcsr_distribution_mp, dbcsr_mp_group
+   USE cp_para_types,                   ONLY: cp_para_env_type
    USE kinds,                           ONLY: dp
    USE mathlib,                         ONLY: diamat_all
    USE message_passing,                 ONLY: mp_min,&
-                                              mp_sum
+                                              mp_sum,&
+                                              mp_sync
    USE pao_input,                       ONLY: pao_fock_param,&
                                               pao_rotinv_param
-   USE pao_linpot_full,                 ONLY: linpot_full_calc_term,&
+   USE pao_linpot_full,                 ONLY: linpot_full_calc_terms,&
                                               linpot_full_count_terms
-   USE pao_linpot_rotinv,               ONLY: linpot_rotinv_calc_term,&
+   USE pao_linpot_rotinv,               ONLY: linpot_rotinv_calc_forces,&
+                                              linpot_rotinv_calc_terms,&
                                               linpot_rotinv_count_terms
    USE pao_param_fock,                  ONLY: pao_calc_U_block_fock
    USE pao_potentials,                  ONLY: pao_guess_initial_potential
@@ -54,18 +57,21 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER :: routineN = 'pao_param_init_linpot'
 
-      INTEGER                                            :: acol, arow, handle, iatom, ikind, kterm, &
-                                                            n, natoms, nterms
+      INTEGER                                            :: acol, arow, handle, iatom, ikind, N, &
+                                                            natoms, nterms
       INTEGER, DIMENSION(:), POINTER                     :: blk_sizes_pri, col_blk_size, row_blk_size
-      REAL(dp), DIMENSION(:, :), POINTER                 :: block_V_term, block_V_terms
+      REAL(dp), DIMENSION(:, :), POINTER                 :: block_V_terms
+      REAL(dp), DIMENSION(:, :, :), POINTER              :: V_blocks
       TYPE(cp_dbcsr_iterator)                            :: iter
       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_s
+      TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
       CALL timeset(routineN, handle)
 
       CALL get_qs_env(qs_env, &
+                      para_env=para_env, &
                       matrix_s=matrix_s, &
                       dft_control=dft_control, &
                       particle_set=particle_set, &
@@ -97,14 +103,14 @@ CONTAINS
       CALL cp_dbcsr_iterator_start(iter, pao%matrix_V_terms)
       DO WHILE (cp_dbcsr_iterator_blocks_left(iter))
          CALL cp_dbcsr_iterator_next_block(iter, arow, acol, block_V_terms)
-         iatom = arow
-         n = blk_sizes_pri(iatom)
-         CPASSERT(n*n == SIZE(block_V_terms, 1))
+         iatom = arow; CPASSERT(arow == acol)
+         N = blk_sizes_pri(iatom)
+         CPASSERT(N*N == SIZE(block_V_terms, 1))
          nterms = SIZE(block_V_terms, 2)
-         DO kterm = 1, nterms
-            block_V_term(1:n, 1:n) => block_V_terms(:, kterm) ! map column into matrix
-            CALL linpot_calc_term(pao, qs_env, iatom, kterm, block_V_term)
-         ENDDO
+         ALLOCATE (V_blocks(N, N, nterms))
+         CALL linpot_calc_terms(pao, qs_env, iatom, V_blocks)
+         block_V_terms = RESHAPE(V_blocks, (/N*N, nterms/)) ! convert matrices into vectors
+         DEALLOCATE (V_blocks)
       ENDDO
       CALL cp_dbcsr_iterator_stop(iter)
 
@@ -112,6 +118,8 @@ CONTAINS
 
       IF (pao%precondition) &
          CALL pao_param_linpot_preconditioner(pao)
+
+      CALL mp_sync(para_env%group) ! ensure that timestop is not called too early
 
       CALL timestop(handle)
    END SUBROUTINE pao_param_init_linpot
@@ -319,7 +327,7 @@ CONTAINS
    SUBROUTINE pao_calc_U_linpot(pao, qs_env, penalty, matrix_M, matrix_G, forces)
       TYPE(pao_env_type), POINTER                        :: pao
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      REAL(dp), INTENT(INOUT)                            :: penalty
+      REAL(dp), INTENT(INOUT), OPTIONAL                  :: penalty
       TYPE(cp_dbcsr_type), OPTIONAL                      :: matrix_M, matrix_G
       REAL(dp), DIMENSION(:, :), INTENT(INOUT), OPTIONAL :: forces
 
@@ -329,9 +337,10 @@ CONTAINS
                                                             n, nterms
       LOGICAL                                            :: found
       REAL(dp), DIMENSION(:), POINTER                    :: vec_M2, vec_V
-      REAL(dp), DIMENSION(:, :), POINTER                 :: block_G, block_M1, block_M2, block_M3, &
-                                                            block_R, block_U, block_V, &
-                                                            block_V_terms, block_X
+      REAL(dp), DIMENSION(:, :), POINTER                 :: block_G, block_M1, block_M2, block_R, &
+                                                            block_U, block_V, block_V_terms, &
+                                                            block_X
+      REAL(dp), DIMENSION(:, :, :), POINTER              :: M_blocks
       REAL(KIND=dp)                                      :: min_gap, regu_energy
       TYPE(cp_dbcsr_iterator)                            :: iter
 
@@ -367,10 +376,11 @@ CONTAINS
          block_V = 0.5_dp*(block_V+TRANSPOSE(block_V)) ! symmetrize exactly
 
          ! regularization energy
-         regu_energy = regu_energy+DOT_PRODUCT(block_X(:, 1), MATMUL(block_R, block_X(:, 1)))
+         IF (PRESENT(penalty)) &
+            regu_energy = regu_energy+DOT_PRODUCT(block_X(:, 1), MATMUL(block_R, block_X(:, 1)))
 
          IF (.NOT. PRESENT(matrix_G) .AND. .NOT. PRESENT(matrix_G)) THEN
-            CALL pao_calc_U_block_fock(pao, iatom, penalty, min_gap, block_V, block_U)
+            CALL pao_calc_U_block_fock(pao, iatom=iatom, penalty=penalty, min_gap=min_gap, V=block_V, U=block_U)
 
          ELSE ! TURNING POINT (if calc grad) -------------------------------------------------------
             CALL cp_dbcsr_get_block_p(matrix=matrix_M, row=iatom, col=iatom, block=block_M1, found=found)
@@ -379,7 +389,8 @@ CONTAINS
             IF (ASSOCIATED(block_M1) .AND. SIZE(block_V_terms) > 0) THEN
                ALLOCATE (vec_M2(n*n))
                block_M2(1:n, 1:n) => vec_M2(:) ! map vector into matrix
-               CALL pao_calc_U_block_fock(pao, iatom, penalty, min_gap, block_V, block_U, block_M1, block_M2)
+               CALL pao_calc_U_block_fock(pao, iatom=iatom, penalty=penalty, min_gap=min_gap, &
+                                          V=block_V, U=block_U, M1=block_M1, G=block_M2)
                IF (MAXVAL(ABS(block_M2-TRANSPOSE(block_M2))) > 1e-14_dp) CPABORT("matrix not symmetric")
 
                ! gradient dE/dX
@@ -387,17 +398,18 @@ CONTAINS
                   CALL cp_dbcsr_get_block_p(matrix=matrix_G, row=iatom, col=iatom, block=block_G, found=found)
                   CPASSERT(ASSOCIATED(block_G))
                   block_G(:, 1) = MATMUL(vec_M2, block_V_terms)
-                  block_G = block_G+2.0_dp*MATMUL(block_R, block_X) ! regularization gradient
+                  IF (PRESENT(penalty)) &
+                     block_G = block_G+2.0_dp*MATMUL(block_R, block_X) ! regularization gradient
                ENDIF
 
                ! forced dE/dR
                IF (PRESENT(forces)) THEN
-                  ALLOCATE (block_M3(n, n))
+                  ALLOCATE (M_blocks(n, n, nterms))
                   DO kterm = 1, nterms
-                     block_M3 = block_M2*block_X(kterm, 1)
-                     CALL linpot_calc_term(pao, qs_env, iatom=iatom, kterm=kterm, block_M=block_M3, forces=forces)
+                     M_blocks(:, :, kterm) = block_M2*block_X(kterm, 1)
                   ENDDO
-                  DEALLOCATE (block_M3)
+                  CALL linpot_calc_forces(pao, qs_env, iatom=iatom, M_blocks=M_blocks, forces=forces)
+                  DEALLOCATE (M_blocks)
                ENDIF
 
                DEALLOCATE (vec_M2)
@@ -407,10 +419,12 @@ CONTAINS
       END DO
       CALL cp_dbcsr_iterator_stop(iter)
 
-      ! sum penalty energies across ranks
-      CALL mp_sum(penalty, group)
-      CALL mp_sum(regu_energy, group)
-      penalty = penalty+regu_energy
+      IF (PRESENT(penalty)) THEN
+         ! sum penalty energies across ranks
+         CALL mp_sum(penalty, group)
+         CALL mp_sum(regu_energy, group)
+         penalty = penalty+regu_energy
+      ENDIF
 
       ! determine smallest homo-lumo gap encountered by fock-layer
       CALL mp_min(min_gap, group)
@@ -429,31 +443,50 @@ CONTAINS
 !> \param pao ...
 !> \param qs_env ...
 !> \param iatom ...
-!> \param kterm ...
-!> \param block_V ...
-!> \param block_M ...
-!> \param forces ...
+!> \param V_blocks ...
 ! **************************************************************************************************
-   SUBROUTINE linpot_calc_term(pao, qs_env, iatom, kterm, block_V, block_M, forces)
+   SUBROUTINE linpot_calc_terms(pao, qs_env, iatom, V_blocks)
       TYPE(pao_env_type), POINTER                        :: pao
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER, INTENT(IN)                                :: iatom, kterm
-      REAL(dp), DIMENSION(:, :), INTENT(OUT), OPTIONAL   :: block_V
-      REAL(dp), DIMENSION(:, :), INTENT(IN), OPTIONAL    :: block_M
-      REAL(dp), DIMENSION(:, :), INTENT(INOUT), OPTIONAL :: forces
-
-      CPASSERT(PRESENT(block_M) .EQV. PRESENT(forces))
+      INTEGER, INTENT(IN)                                :: iatom
+      REAL(dp), DIMENSION(:, :, :), INTENT(OUT)          :: V_blocks
 
       SELECT CASE (pao%parameterization)
       CASE (pao_fock_param)
-         CALL linpot_full_calc_term(kterm, block_V)
+         CALL linpot_full_calc_terms(V_blocks)
       CASE (pao_rotinv_param)
-         CALL linpot_rotinv_calc_term(qs_env, iatom, kterm, block_V, block_M, forces)
+         CALL linpot_rotinv_calc_terms(qs_env, iatom, V_blocks)
       CASE DEFAULT
          CPABORT("unkown parameterization")
       END SELECT
 
-   END SUBROUTINE linpot_calc_term
+   END SUBROUTINE linpot_calc_terms
+
+! **************************************************************************************************
+!> \brief Internal routine, calculates force contributions from potential parametrization
+!> \param pao ...
+!> \param qs_env ...
+!> \param iatom ...
+!> \param M_blocks ...
+!> \param forces ...
+! **************************************************************************************************
+   SUBROUTINE linpot_calc_forces(pao, qs_env, iatom, M_blocks, forces)
+      TYPE(pao_env_type), POINTER                        :: pao
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      INTEGER, INTENT(IN)                                :: iatom
+      REAL(dp), DIMENSION(:, :, :), INTENT(IN)           :: M_blocks
+      REAL(dp), DIMENSION(:, :), INTENT(INOUT)           :: forces
+
+      SELECT CASE (pao%parameterization)
+      CASE (pao_fock_param)
+         ! no force contributions
+      CASE (pao_rotinv_param)
+         CALL linpot_rotinv_calc_forces(qs_env, iatom, M_blocks, forces)
+      CASE DEFAULT
+         CPABORT("unkown parameterization")
+      END SELECT
+
+   END SUBROUTINE linpot_calc_forces
 
 ! **************************************************************************************************
 !> \brief Calculate intial guess for matrix_X

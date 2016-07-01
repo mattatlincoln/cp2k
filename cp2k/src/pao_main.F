@@ -28,8 +28,8 @@ MODULE pao_main
    USE pao_methods,                     ONLY: &
         pao_add_forces, pao_build_core_hamiltonian, pao_build_matrix_X, pao_build_orthogonalizer, &
         pao_build_selector, pao_calc_energy, pao_calc_outer_grad_lnv, pao_check_grad, &
-        pao_check_trace_ps, pao_guess_initial_P, pao_print_atom_info, pao_store_P, &
-        pao_test_convergence
+        pao_check_trace_ps, pao_guess_initial_P, pao_init_gaussian_radii, pao_print_atom_info, &
+        pao_store_P, pao_test_convergence
    USE pao_ml,                          ONLY: pao_machine_learning_init,&
                                               pao_machine_learning_predict
    USE pao_optimizer,                   ONLY: pao_opt_finalize,&
@@ -80,6 +80,8 @@ CONTAINS
       ! parse input
       CALL parse_pao_section(pao, input)
 
+      CALL pao_init_gaussian_radii(pao, qs_env)
+
       ! train machine learning
       CALL pao_machine_learning_init(pao, qs_env)
 
@@ -98,7 +100,6 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'pao_optimization_start'
 
       INTEGER                                            :: handle
-      REAL(dp)                                           :: penalty
       TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_s
       TYPE(ls_mstruct_type), POINTER                     :: ls_mstruct
       TYPE(pao_env_type), POINTER                        :: pao
@@ -165,8 +166,7 @@ CONTAINS
       CALL cp_dbcsr_create(ls_mstruct%matrix_B, template=pao%matrix_Y)
 
       ! fill PAO transformation matrices
-      CALL pao_update_AB(pao, qs_env, ls_mstruct, penalty)
-      IF (pao%iw > 0) WRITE (pao%iw, '(A,F20.9)') " PAO| Energy from initial penalty:", penalty
+      CALL pao_update_AB(pao, qs_env, ls_mstruct)
 
       CALL timestop(handle)
    END SUBROUTINE pao_optimization_start
@@ -186,7 +186,7 @@ CONTAINS
 
       INTEGER                                            :: handle, icycle
       LOGICAL                                            :: cycle_converged, do_mixing, should_stop
-      REAL(KIND=dp)                                      :: energy
+      REAL(KIND=dp)                                      :: energy, penalty
       TYPE(cp_dbcsr_type)                                :: matrix_M, matrix_X_mixing
       TYPE(ls_mstruct_type), POINTER                     :: ls_mstruct
       TYPE(pao_env_type), POINTER                        :: pao
@@ -242,9 +242,9 @@ CONTAINS
 
          IF (pao%linesearch%starts) THEN
             icycle = icycle+1
-            ! calc new gradient
+            ! calc new gradient including penalty terms
             CALL pao_calc_outer_grad_lnv(qs_env, ls_scf_env, matrix_M)
-            CALL pao_calc_U(pao, qs_env, matrix_M, pao%matrix_G)
+            CALL pao_calc_U(pao, qs_env, matrix_M=matrix_M, matrix_G=pao%matrix_G, penalty=penalty)
             CALL cp_dbcsr_release(matrix_M)
             CALL pao_check_grad(pao, qs_env, ls_scf_env)
 

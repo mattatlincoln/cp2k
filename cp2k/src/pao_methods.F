@@ -8,6 +8,7 @@
 !> \author Ole Schuett
 ! **************************************************************************************************
 MODULE pao_methods
+   USE ao_util,                         ONLY: exp_radius
    USE atomic_kind_types,               ONLY: atomic_kind_type,&
                                               get_atomic_kind
    USE bibliography,                    ONLY: Kolafa2004,&
@@ -51,6 +52,8 @@ MODULE pao_methods
                                               qs_environment_type
    USE qs_initial_guess,                ONLY: calculate_atomic_fock_matrix
    USE qs_kind_types,                   ONLY: get_qs_kind,&
+                                              pao_descriptor_type,&
+                                              pao_potential_type,&
                                               qs_kind_type
    USE qs_ks_methods,                   ONLY: qs_ks_update_qs_env
    USE qs_ks_types,                     ONLY: qs_ks_did_change,&
@@ -66,7 +69,7 @@ MODULE pao_methods
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'pao_methods'
 
-   PUBLIC :: pao_print_atom_info
+   PUBLIC :: pao_print_atom_info, pao_init_gaussian_radii
    PUBLIC :: pao_build_orthogonalizer, pao_build_selector
    PUBLIC :: pao_build_matrix_X, pao_build_core_hamiltonian
    PUBLIC :: pao_test_convergence
@@ -77,6 +80,40 @@ MODULE pao_methods
    PUBLIC :: pao_check_grad
 
 CONTAINS
+
+! **************************************************************************************************
+!> \brief Initialize radii of Gaussians to speedup screeing later on
+!> \param pao ...
+!> \param qs_env ...
+! **************************************************************************************************
+   SUBROUTINE pao_init_gaussian_radii(pao, qs_env)
+      TYPE(pao_env_type), POINTER                        :: pao
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'pao_init_gaussian_radii'
+
+      INTEGER                                            :: handle, i, ikind
+      TYPE(pao_descriptor_type), DIMENSION(:), POINTER   :: pao_descriptors
+      TYPE(pao_potential_type), DIMENSION(:), POINTER    :: pao_potentials
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
+
+      CALL timeset(routineN, handle)
+      CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
+
+      DO ikind = 1, SIZE(qs_kind_set)
+         CALL get_qs_kind(qs_kind_set(ikind), &
+                          pao_potentials=pao_potentials, &
+                          pao_descriptors=pao_descriptors)
+         DO i = 1, SIZE(pao_potentials)
+            pao_potentials(i)%beta_radius = exp_radius(0, pao_potentials(i)%beta, pao%eps_pgf, 1.0_dp)
+         ENDDO
+         DO i = 1, SIZE(pao_descriptors)
+            pao_descriptors(i)%beta_radius = exp_radius(0, pao_descriptors(i)%beta, pao%eps_pgf, 1.0_dp)
+            pao_descriptors(i)%screening_radius = exp_radius(0, pao_descriptors(i)%screening, pao%eps_pgf, 1.0_dp)
+         ENDDO
+      ENDDO
+      CALL timestop(handle)
+   END SUBROUTINE pao_init_gaussian_radii
 
 ! **************************************************************************************************
 !> \brief Prints a one line summary for each atom.
@@ -396,7 +433,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ! calculate matrix U, which determines the pao basis
-      CALL pao_update_AB(pao, qs_env, ls_scf_env%ls_mstruct, penalty)
+      CALL pao_update_AB(pao, qs_env, ls_scf_env%ls_mstruct, penalty=penalty)
 
       ! calculat S, S_inv, S_sqrt, and S_sqrt_inv in the new pao basis
       CALL pao_rebuild_S(qs_env, ls_scf_env)
@@ -1083,6 +1120,15 @@ CONTAINS
 
       IF (pao%iw > 0) WRITE (pao%iw, *) "PAO| Adding forces."
 
+      IF (pao%max_pao /= 0) THEN
+         IF (pao%penalty_strength /= 0.0_dp) &
+            CPABORT("PAO forces require PENALTY_STRENGTH or MAX_PAO set to zero")
+         IF (pao%linpot_regu_strength /= 0.0_dp) &
+            CPABORT("PAO forces require LINPOT_REGULARIZATION_STRENGTH or MAX_PAO set to zero")
+         IF (pao%regularization /= 0.0_dp) &
+            CPABORT("PAO forces require REGULARIZATION or MAX_PAO set to zero")
+      ENDIF
+
       CALL get_qs_env(qs_env, &
                       para_env=para_env, &
                       particle_set=particle_set, &
@@ -1091,7 +1137,7 @@ CONTAINS
       ALLOCATE (forces(natoms, 3))
       forces(:, :) = 0.0_dp
       CALL pao_calc_outer_grad_lnv(qs_env, ls_scf_env, matrix_M)
-      CALL pao_calc_U(pao, qs_env, matrix_M, pao%matrix_G, forces=forces)
+      CALL pao_calc_U(pao, qs_env, matrix_M, pao%matrix_G, forces=forces) ! without penalty terms
       CALL cp_dbcsr_release(matrix_M)
 
       IF (SIZE(pao%ml_training_set) > 0) &

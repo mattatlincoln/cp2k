@@ -80,8 +80,6 @@ MODULE rt_propagation_output
                                               write_mo_free_results
    USE qs_subsys_types,                 ONLY: qs_subsys_get,&
                                               qs_subsys_type
-   USE realspace_grid_types,            ONLY: realspace_grid_desc_p_type,&
-                                              realspace_grid_p_type
    USE rt_propagation_types,            ONLY: get_rtp,&
                                               rt_prop_type
    USE rt_propagation_utils,            ONLY: calculate_P_imaginary
@@ -688,22 +686,16 @@ CONTAINS
       TYPE(current_env_type)                             :: current_env
       TYPE(particle_list_type), POINTER                  :: particles
       TYPE(pw_env_type), POINTER                         :: pw_env
-      TYPE(pw_p_type), DIMENSION(:), POINTER             :: rho_g, rho_r
       TYPE(pw_p_type), POINTER                           :: gs, rs
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
-      TYPE(qs_rho_type), POINTER                         :: rho
       TYPE(qs_subsys_type), POINTER                      :: subsys
-      TYPE(realspace_grid_desc_p_type), DIMENSION(:), &
-         POINTER                                         :: rs_descs
-      TYPE(realspace_grid_p_type), DIMENSION(:), POINTER :: rs_rho
 
       CALL timeset(routineN, handle)
 
       logger => cp_get_default_logger()
-      CALL get_qs_env(qs_env=qs_env, subsys=subsys, pw_env=pw_env, rho=rho)
+      CALL get_qs_env(qs_env=qs_env, subsys=subsys, pw_env=pw_env)
       CALL qs_subsys_get(subsys, particles=particles)
-      CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, rs_grids=rs_rho, rs_descs=rs_descs)
-      CALL qs_rho_get(rho, rho_r=rho_r, rho_g=rho_g)
+      CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool)
 
       NULLIFY (zero, rs, gs)
       ALLOCATE (rs, gs)

@@ -1471,6 +1471,9 @@ CONTAINS
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
 
+      CALL create_wannier_section(print_key)
+      CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
 !
       !Printing of Moments
       CALL create_dipoles_section(print_key, "MOMENTS", high_print_level)
@@ -1661,6 +1664,38 @@ CONTAINS
                           description="Calculate atomic contributions to the unassigned charge.", &
                           usage="ANALYZE_UNASSIGNED_CHARGE {logical}", repeats=.FALSE., n_var=1, &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE., type_of_var=logical_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
+
+      !DOS from density matrix
+      CALL cp_print_key_section_create(print_key, "ENERGY_WINDOWS", &
+                                       description="Controls the printing of the DOS from the density matrix. "// &
+                                       "This allows the calculation of the DOS even in density matrix based/linear scaling. "// &
+                                       "However, it requires a cubically scaling diagonalization of the Hamiltonian. "// &
+                                       "Hartree-Fock NYI, values will be wrong. "// &
+                                       "Careful, the orbitals in rtp/emd are not actually eigenstates of the Hamiltonian.", &
+                                       print_level=high_print_level, common_iter_levels=3, &
+                                       each_iter_names=s2a("MD"), each_iter_values=(/1/), &
+                                       add_last=add_last_numeric, filename="energy-windows")
+      CALL keyword_create(keyword, name="N_WINDOWS", &
+                          description="The number of energy windows.", &
+                          usage="N_WINDOWS 200", &
+                          default_i_val=100)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, name="PRINT_CUBES", &
+                          description="Print the energy windows to cube files", &
+                          usage="DENSITY_PROPAGATION .TRUE.", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, name="STRIDE", &
+                          description="The stride (X,Y,Z) used to write the energy windows cube files (if enabled) "// &
+                          "(larger values result in smaller cube files). You can provide 3 numbers (for X,Y,Z) or"// &
+                          " 1 number valid for all components.", &
+                          usage="STRIDE 2 2 2", n_var=-1, default_i_vals=(/2, 2, 2/), type_of_var=integer_t)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
       CALL section_add_subsection(section, print_key)
@@ -2058,6 +2093,61 @@ CONTAINS
       CALL section_release(subsection)
 
    END SUBROUTINE create_pdos_section
+
+! **************************************************************************************************
+!> \brief ...
+!> \param print_key ...
+! **************************************************************************************************
+   SUBROUTINE create_wannier_section(print_key)
+
+      TYPE(section_type), POINTER                        :: print_key
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'create_wannier_section', &
+         routineP = moduleN//':'//routineN
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      NULLIFY (keyword)
+
+      CALL cp_print_key_section_create(print_key, "WANNIER90", &
+                                       description="Interface to Wannier90 code. (EXPERIMENTAL)", &
+                                       print_level=debug_print_level, common_iter_levels=1, filename="")
+
+      CALL keyword_create(keyword, name="SEED_NAME", &
+                          description="The seedname for the Wannier90 calculation (body of filenames).", &
+                          usage="SEED_NAME  filename", default_c_val="wannier90", &
+                          n_var=1, type_of_var=char_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="MP_GRID", &
+                          description="The dimensions of the Monkhorst-Pack k-point grid. ", &
+                          usage="MP_GRID 6 6 6", n_var=-1, default_i_vals=(/10, 10, 10/), type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="ADDED_MOS", &
+                          variants=(/"ADDED_BANDS"/), &
+                          description="Number of MOs/Bands added to the Band Structure calculation.", &
+                          default_i_val=0)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="EXCLUDE_BANDS", &
+                          description="List of Bands excluded in the Wannier calculation.", &
+                          usage="EXCLUDE_BANDS b1 b2 ...", n_var=-1, repeats=.TRUE., &
+                          type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="WANNIER_FUNCTIONS", &
+                          description="Number of Wannier functions to be calculated. ", &
+                          usage="WANNIER_FUNCTIONS 6", n_var=1, default_i_val=0, &
+                          repeats=.TRUE., type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_wannier_section
 
 ! **************************************************************************************************
 !> \brief ...
