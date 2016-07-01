@@ -357,6 +357,9 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_d(extent_out, extent_in,&
        rows, columns)
+#if defined(__LIBXSMM)
+    USE libxsmm
+#endif
     REAL(kind=real_8), DIMENSION(:), INTENT(OUT) :: extent_out
     REAL(kind=real_8), DIMENSION(:), INTENT(IN)  :: extent_in
     INTEGER, INTENT(IN)                :: rows, columns
@@ -365,11 +368,23 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
+#if defined(__LIBXSMM)
+    IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
+        LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
+        LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
+    THEN
+        CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
+                                   8, rows, columns, rows, rows)
+    ELSE
+#endif
 #if defined(__MKL)
     CALL mkl_domatcopy('C', 'T', rows, columns, 1.0_real_8, extent_in, rows, extent_out, rows)
 #else
     extent_out(1:rows*columns) = RESHAPE(TRANSPOSE(&
          RESHAPE(extent_in(1:rows*columns), (/rows, columns/))), (/rows*columns/))
+#endif
+#if defined(__LIBXSMM)
+    ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_d
 
@@ -446,6 +461,9 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_2d1d_d(extent_out, extent_in,&
        rows, columns)
+#if defined(__LIBXSMM)
+    USE libxsmm
+#endif
     INTEGER, INTENT(IN)                           :: rows, columns
     REAL(kind=real_8), DIMENSION(columns,rows), INTENT(OUT) :: extent_out
     REAL(kind=real_8), DIMENSION(:), INTENT(IN)             :: extent_in
@@ -454,10 +472,22 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
+#if defined(__LIBXSMM)
+    IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
+        LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
+        LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
+    THEN
+        CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
+                                   8, rows, columns, rows, rows)
+    ELSE
+#endif
 #if defined(__MKL)
     CALL mkl_domatcopy('C', 'T', rows, columns, 1.0_real_8, extent_in, rows, extent_out, rows)
 #else
     extent_out = TRANSPOSE(RESHAPE(extent_in, (/rows, columns/)))
+#endif
+#if defined(__LIBXSMM)
+    ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_2d1d_d
 
@@ -492,6 +522,9 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_1d2d_d(extent_out, extent_in,&
        rows, columns)
+#if defined(__LIBXSMM)
+    USE libxsmm
+#endif
     REAL(kind=real_8), DIMENSION(:), INTENT(OUT)            :: extent_out
     INTEGER, INTENT(IN)                           :: rows, columns
     REAL(kind=real_8), DIMENSION(rows,columns), INTENT(IN)  :: extent_in
@@ -500,10 +533,22 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
+#if defined(__LIBXSMM)
+    IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
+        LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
+        LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
+    THEN
+        CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
+                                   8, rows, columns, rows, rows)
+    ELSE
+#endif
 #if defined(__MKL)
     CALL mkl_domatcopy('C', 'T', rows, columns, 1.0_real_8, extent_in, rows, extent_out, rows)
 #else
     extent_out = RESHAPE(TRANSPOSE(extent_in), (/rows*columns/))
+#endif
+#if defined(__LIBXSMM)
+    ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_1d2d_d
 
