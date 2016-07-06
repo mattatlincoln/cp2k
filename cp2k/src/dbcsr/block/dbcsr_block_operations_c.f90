@@ -357,7 +357,7 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_c(extent_out, extent_in,&
        rows, columns)
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     USE libxsmm
 #endif
     COMPLEX(kind=real_4), DIMENSION(:), INTENT(OUT) :: extent_out
@@ -368,22 +368,22 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
         LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
         LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
     THEN
         CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
-                                   8, rows, columns, rows, rows)
+                                   8, rows, columns, rows, columns)
     ELSE
 #endif
 #if defined(__MKL)
-    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, rows)
+    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, columns)
 #else
     extent_out(1:rows*columns) = RESHAPE(TRANSPOSE(&
          RESHAPE(extent_in(1:rows*columns), (/rows, columns/))), (/rows*columns/))
 #endif
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_c
@@ -461,7 +461,7 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_2d1d_c(extent_out, extent_in,&
        rows, columns)
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     USE libxsmm
 #endif
     INTEGER, INTENT(IN)                           :: rows, columns
@@ -472,21 +472,21 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
         LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
         LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
     THEN
         CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
-                                   8, rows, columns, rows, rows)
+                                   8, rows, columns, rows, columns)
     ELSE
 #endif
 #if defined(__MKL)
-    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, rows)
+    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, columns)
 #else
     extent_out = TRANSPOSE(RESHAPE(extent_in, (/rows, columns/)))
 #endif
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_2d1d_c
@@ -522,7 +522,7 @@
 ! **************************************************************************************************
   CP_MKL_PURE SUBROUTINE block_transpose_copy_1d2d_c(extent_out, extent_in,&
        rows, columns)
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     USE libxsmm
 #endif
     COMPLEX(kind=real_4), DIMENSION(:), INTENT(OUT)            :: extent_out
@@ -533,21 +533,21 @@
       routineP = moduleN//':'//routineN
 
 !   ---------------------------------------------------------------------------
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     IF (CP_VERSION4(1, 4, 3, 88).LE.CP_VERSION4( &
         LIBXSMM_VERSION_MAJOR,  LIBXSMM_VERSION_MINOR, &
         LIBXSMM_VERSION_UPDATE, LIBXSMM_VERSION_PATCH)) &
     THEN
         CALL libxsmm_transpose_oop(C_LOC(extent_out), C_LOC(extent_in), &
-                                   8, rows, columns, rows, rows)
+                                   8, rows, columns, rows, columns)
     ELSE
 #endif
 #if defined(__MKL)
-    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, rows)
+    CALL mkl_comatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent_in, rows, extent_out, columns)
 #else
     extent_out = RESHAPE(TRANSPOSE(extent_in), (/rows*columns/))
 #endif
-#if defined(__LIBXSMM)
+#if defined(__LIBXSMM) && (1 < __LIBXSMM)
     ENDIF
 #endif
   END SUBROUTINE block_transpose_copy_1d2d_c
@@ -571,7 +571,7 @@
     INTEGER :: r, c
 !   ---------------------------------------------------------------------------
 #if defined(__MKL)
-    CALL mkl_cimatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent, rows, rows)
+    CALL mkl_cimatcopy('C', 'T', rows, columns, CMPLX(1.0, 0.0, real_4), extent, rows, columns)
 #else
     DO r = 1 , columns
       DO c = 1 , rows
