@@ -384,7 +384,7 @@ ifneq (,$(wildcard $(LIBXSMM_LIB)))
 	@touch $(OBJDIR)/*.o
 endif
 
-    DFLAGS += -D__LIBXSMM
+    DFLAGS += -D__LIBXSMM=$(LIBXSMM)
     IFLAGS += -I$(MAINOBJDIR)/$(ARCH)/$(ONEVERSION)/libxsmm/include
     LIBS += $(LIBXSMM_LIB) $(MAINLIBDIR)/$(ARCH)/$(ONEVERSION)/libxsmm/lib/libxsmmf.a
   endif
