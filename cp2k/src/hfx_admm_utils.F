@@ -87,6 +87,7 @@ MODULE hfx_admm_utils
 
    ! *** Public subroutines ***
    PUBLIC :: hfx_ks_matrix, hfx_admm_init, create_admm_xc_section
+   PUBLIC :: pw_hfx
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'hfx_admm_utils'
 

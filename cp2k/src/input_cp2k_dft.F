@@ -4104,7 +4104,7 @@ CONTAINS
                           "Currently limited for singlet states and spin-restricted density "// &
                           "and can be used with Gaussian and Plane Waves (GPW) method only. "// &
                           "The keyword 'FORCE_EVAL%DFT%EXCITATIONS tddfpt' is no longer needed.", &
-                          n_keywords=8, n_subsections=1, repeats=.FALSE., &
+                          n_keywords=11, n_subsections=1, repeats=.FALSE., &
                           citations=(/Iannuzzi2005/))
 
       NULLIFY (keyword, print_key, subsection)
@@ -4125,6 +4125,7 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      ! TO DO: remove the following keyword
       CALL keyword_create(keyword, name="ADDED_OCC_MOS", &
                           description="Number of additional occupied molecular orbitals in the active space "// &
                           "(0 means as few as possible, -1 means all occupied orbitals). "// &
@@ -4138,6 +4139,14 @@ CONTAINS
                           description="Maximal number of iterations to be performed.", &
                           n_var=1, type_of_var=integer_t, &
                           default_i_val=50)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="MAX_KV", &
+                          description="Maximal number of Krylov space vectors. "//&
+                                      "Davidson iterations will be restarted upon reaching this limit.", &
+                          n_var=1, type_of_var=integer_t, &
+                          default_i_val=1000)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -4163,11 +4172,27 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, name="ORTHOGONAL_EPS", &
+                          description="The largest possible overlap between the ground state and excited state wave-functions. "//&
+                                      "Davidson iterations will be restarted when the overlap goes beyond this threshold "//&
+                                      "in order to prevent numerical instability.", &
+                          n_var=1, type_of_var=real_t, &
+                          default_r_val=1.0e-6_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       ! Logical
       CALL keyword_create(keyword, name="ADD_DEGENERATE_STATES", &
                           description="Automatically include degenerate excited states into the active space.", &
                           n_var=1, type_of_var=logical_t, &
                           default_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="RKS_TRIPLETS", &
+                          description="Compute triplet excited states using spin-unpolarised molecular orbitals.", &
+                          n_var=1, type_of_var=logical_t, &
+                          default_l_val=.FALSE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
