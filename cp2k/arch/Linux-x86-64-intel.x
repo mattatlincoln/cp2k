@@ -91,7 +91,9 @@ endif
 
 # consider more accurate -fp-model (C/C++: precise, Fortran: source)
 FPFLAGS ?= -fp-model fast=2
-#FPFLAGS += -fast-transcendentals -fimf-domain-exclusion=1 -complex-limited-range
+FPFLAGS += -complex-limited-range
+#FPFLAGS += -fast-transcendentals
+#FPFLAGS += -fimf-domain-exclusion=1
 
 # TBB malloc proxy is enabled if TBBROOT is set
 TBBMALLOC ?= 1
