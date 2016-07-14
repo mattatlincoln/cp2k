@@ -48,6 +48,7 @@ MODULE qs_tddfpt5_methods
                                               cp_print_key_unit_nr,&
                                               cp_rm_iter_level
    USE cp_para_types,                   ONLY: cp_para_env_type
+   USE hfx_admm_utils,                  ONLY: tddft_hfx_matrix
    USE input_constants,                 ONLY: cholesky_dbcsr,&
                                               cholesky_inverse,&
                                               cholesky_off,&
@@ -1686,6 +1687,125 @@ MODULE qs_tddfpt5_methods
       CALL timestop(handle)
    END SUBROUTINE tddfpt_apply_kernel
 
+! **************************************************************************************************
+!> \brief  Update the hat{A} C_{1,i} vectors by adding exact exchange terms
+!> \param a_kv     hat{A} C_{1,i} (updated on exit)
+!> \param alpha    scale factor
+!> \param evecs    trial vectors C_{1,i}
+!> \param gs_mos      molecular orbitals optimized for the ground state (only occupied molecular
+!>                    orbitals [field %matrix_mos_occ] are needed)
+!> \param qs_env   Quickstep environment
+!> \param matrix_s overlap matrix
+!> \par History
+!>    * 05.2016 compute all coulomb terms in one go [Sergey Chulkov]
+!> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
+!>       Mohamed Fawzi on 10.2002.
+! **************************************************************************************************
+   SUBROUTINE tddfpt_apply_hfx(Aop_evects, alpha, evects, gs_mos, qs_env, matrix_s)
+      TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: Aop_evects
+      REAL(kind=dp), INTENT(in)                          :: alpha
+      TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: evects
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), INTENT(in) :: gs_mos
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_apply_coulomb', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER :: handle, ivect, nvects, nao, ispin, nspins
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: nmo_occ
+      REAL(kind=dp) :: pair_energy
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: rho_ia_ao, K_ia_munu
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_fm_type), POINTER                          :: rho_ia_fm
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(pw_env_type), POINTER                         :: pw_env
+      TYPE(pw_poisson_type), POINTER                     :: poisson_env
+      TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
+      TYPE(qs_rho_type), POINTER                         :: rho_ia_struct
+
+
+      CALL timeset(routineN, handle)
+
+      nspins = SIZE(evects, 1)
+      nvects = SIZE(evects, 2)
+
+      ! *** initialize variables ***
+      NULLIFY (blacs_env, para_env, pw_env)
+      CALL get_qs_env(qs_env, blacs_env=blacs_env, para_env=para_env, pw_env=pw_env)
+
+      NULLIFY (auxbas_pw_pool, poisson_env)
+      CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, poisson_env=poisson_env)
+
+      ALLOCATE (nmo_occ(nspins))
+      DO ispin = 1,nspins
+         CALL cp_fm_get_info(gs_mos(ispin)%matrix_mos_occ, nrow_global=nao, ncol_global=nmo_occ(ispin))
+      END DO
+
+      NULLIFY (rho_ia_ao)
+      CALL cp_dbcsr_allocate_matrix_set(rho_ia_ao, nspins)
+      DO ispin = 1,nspins
+         CALL cp_dbcsr_init_p(rho_ia_ao(ispin)%matrix)
+         CALL cp_dbcsr_copy(rho_ia_ao(ispin)%matrix, matrix_s)
+      END DO
+
+      NULLIFY (rho_ia_struct)
+      CALL qs_rho_create(rho_ia_struct)
+      CALL qs_rho_set(rho_ia_struct, rho_ao=rho_ia_ao)
+      CALL qs_rho_rebuild(rho_ia_struct, qs_env, rebuild_ao=.TRUE., rebuild_grids=.FALSE.)
+
+      NULLIFY (K_ia_munu)
+      CALL cp_dbcsr_allocate_matrix_set(K_ia_munu, nspins)
+      DO ispin = 1,nspins
+         CALL cp_dbcsr_init_p(K_ia_munu(ispin)%matrix)
+         CALL cp_dbcsr_copy(K_ia_munu(ispin)%matrix, matrix_s)
+      END DO
+
+      NULLIFY (fm_struct, rho_ia_fm)
+      CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, context=blacs_env, para_env=para_env)
+      CALL cp_fm_create(rho_ia_fm, fm_struct)
+      CALL cp_fm_struct_release(fm_struct)
+
+      ! *** compute hfx terms ***
+      DO ivect = 1,nvects
+         DO ispin = 1,nspins
+            CALL cp_gemm('N', 'T', nao, nao, nmo_occ(ispin), 0.5_dp, &
+                         gs_mos(ispin)%matrix_mos_occ, evects(ispin, ivect)%matrix, 0.0_dp, rho_ia_fm)
+            CALL cp_gemm('N', 'T', nao, nao, nmo_occ(ispin), 0.5_dp, &
+                         evects(ispin, ivect)%matrix, gs_mos(ispin)%matrix_mos_occ, 1.0_dp, rho_ia_fm)
+
+            CALL copy_fm_to_dbcsr(rho_ia_fm, rho_ia_ao(ispin)%matrix, keep_sparsity=.TRUE.)
+            CALL cp_dbcsr_set(K_ia_munu(ispin)%matrix, 0.0_dp)
+         END DO
+         CALL qs_rho_update_rho(rho_ia_struct, qs_env)
+
+         CALL tddft_hfx_matrix(qs_env, rho_ia_struct, K_ia_munu)
+
+         DO ispin = 1,nspins
+            CALL cp_dbcsr_sm_fm_multiply(K_ia_munu(ispin)%matrix, gs_mos(ispin)%matrix_mos_occ, Aop_evects(ispin, ivect)%matrix, &
+                                         ncol=nmo_occ(ispin), alpha=alpha, beta=1.0_dp)
+         END DO
+      END DO
+
+      ! *** clean up ***
+      CALL cp_fm_release(rho_ia_fm)
+
+      DO ispin = 1, SIZE(K_ia_munu)
+         IF (ASSOCIATED(K_ia_munu(ispin)%matrix)) THEN
+            CALL cp_dbcsr_deallocate_matrix(K_ia_munu(ispin)%matrix)
+         END IF
+      END DO
+      DEALLOCATE (K_ia_munu)
+
+      !CALL cp_dbcsr_deallocate_matrix(K_ia_munu%matrix)
+      CALL qs_rho_release(rho_ia_struct)
+
+      DEALLOCATE(nmo_occ)
+
+      CALL timestop(handle)
+   END SUBROUTINE tddfpt_apply_hfx
+
    SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, evects, gs_mos, is_rks_triplets, &
                                         qs_env, matrix_ks, matrix_s, xc_rho_set, xc_deriv_set, xc_section)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: Aop_evects
@@ -1739,6 +1859,20 @@ MODULE qs_tddfpt5_methods
                                   is_rks_triplets=is_rks_triplets, &
                                   xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, &
                                   qs_env=qs_env, matrix_s=matrix_s, xc_section=xc_section)
+
+         ! add contributions from hfx terms
+         IF (.NOT. is_rks_triplets) THEN
+            IF (nspins > 1) THEN 
+               alpha = 4.0_dp
+            ELSE
+               ! alpha == 2 due to singlet state
+               alpha = 4.0_dp
+            END IF
+
+            CALL tddfpt_apply_hfx(Aop_evects=Aop_evects, alpha=alpha, evects=evects, &
+                                      gs_mos=gs_mos, qs_env=qs_env, matrix_s=matrix_s)
+         END IF
+
 MARK_USED(xc_rho_set)
 MARK_USED(xc_deriv_set)
 MARK_USED(xc_section)
