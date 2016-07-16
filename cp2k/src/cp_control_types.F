@@ -396,6 +396,8 @@ MODULE cp_control_types
       REAL(kind=dp)                             :: orthogonal_eps
       !> should all degenerate excited states be automatically added to the active space
       LOGICAL                                   :: add_degenerate
+      !> take into account exact exchange contributions while expanding Krylov space
+      LOGICAL                                   :: hfx_residual
       !> compute triplet excited states using spin-unpolarised molecular orbitals
       LOGICAL                                   :: rks_triplets
       !> compute transition dipole moments and oscillator strengths

@@ -1085,6 +1085,7 @@ CONTAINS
       CALL section_vals_val_get(t_section, "ORTHOGONAL_EPS", r_val=t_control%orthogonal_eps)
 
       CALL section_vals_val_get(t_section, "ADD_DEGENERATE_STATES", l_val=t_control%add_degenerate)
+      CALL section_vals_val_get(t_section, "HFX_RESIDUAL", l_val=t_control%hfx_residual)
       CALL section_vals_val_get(t_section, "RKS_TRIPLETS", l_val=t_control%rks_triplets)
 
       IF (t_control%conv < 0) &

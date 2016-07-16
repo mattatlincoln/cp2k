@@ -4189,6 +4189,15 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, name="HFX_RESIDUAL", &
+                          description="Take into account exact exchange contributions while expanding Krylov space. "//&
+                                      "This could potentially reduce the number of Davidson iterations at the expense of "//&
+                                      "every single Davidson iteration. Make sense for hybrid xc-functionals only.", &
+                          n_var=1, type_of_var=logical_t, &
+                          default_l_val=.FALSE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, name="RKS_TRIPLETS", &
                           description="Compute triplet excited states using spin-unpolarised molecular orbitals.", &
                           n_var=1, type_of_var=logical_t, &
