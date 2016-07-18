@@ -385,6 +385,8 @@ MODULE cp_control_types
       INTEGER                                   :: niters
       !> maximal number of Krylov space vectors
       INTEGER                                   :: nkvs
+      !> maximal number of orthogonalisation iterations
+      INTEGER                                   :: nreortho
       !> target accuracy
       REAL(kind=dp)                             :: conv
       !> energy threshold which controls when excited states are considered to be degenerate

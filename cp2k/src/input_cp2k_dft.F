@@ -4150,11 +4150,19 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, name="MAX_REORTHO", &
+                          description="Maximal number of orthogonalisation iterations. "//&
+                                      "Davidson iterations will be restarted if orthogonality will not been reached.", &
+                          n_var=1, type_of_var=integer_t, &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       ! Real
       CALL keyword_create(keyword, name="CONVERGENCE", &
                           description="Target accuracy for excited state energies.", &
                           n_var=1, type_of_var=real_t, unit_str="hartree", &
-                          default_r_val=1.0e-4_dp)
+                          default_r_val=1.0e-5_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -4177,7 +4185,7 @@ CONTAINS
                                       "Davidson iterations will be restarted when the overlap goes beyond this threshold "//&
                                       "in order to prevent numerical instability.", &
                           n_var=1, type_of_var=real_t, &
-                          default_r_val=1.0e-6_dp)
+                          default_r_val=1.0e-4_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

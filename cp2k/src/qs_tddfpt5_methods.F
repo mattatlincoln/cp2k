@@ -193,13 +193,13 @@ MODULE qs_tddfpt5_methods
       TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt', routineP = moduleN//':'//routineN
-      INTEGER, PARAMETER :: max_reortho = 1000
+      INTEGER, PARAMETER :: max_reortho = 16384
 
       CHARACTER(len=20)                                  :: navail_str, nstates_str
       INTEGER :: handle, energy_unit, log_unit, ispin, nspins, nstates, nstates_total, istate, nao, max_krylov_vects, &
                  nvects_new, nvects_exists, iter, niters, nstates_conv, mult
       INTEGER(kind=int_8) :: nstates_total_i8
-      LOGICAL :: do_hfx, do_hfx_residual, is_nonortho
+      LOGICAL :: do_hfx, do_hfx_residual, is_nonortho, is_restarted
       REAL(kind=dp) :: C_hf, t1, t2, conv
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: evals_last, evals_prev
       TYPE(cp_logger_type), POINTER                      :: logger
@@ -257,6 +257,7 @@ MODULE qs_tddfpt5_methods
          CALL section_vals_val_get(hfx_section, "FRACTION", r_val=C_hf)
          do_hfx = (C_hf /= 0.0_dp)
       END IF
+      do_hfx_residual = do_hfx .AND. tddfpt_control%hfx_residual
 
       nspins = dft_control%nspins
 
@@ -295,8 +296,6 @@ MODULE qs_tddfpt5_methods
          tddfpt_control%rks_triplets = .FALSE.
          CALL cp_warn(__LOCATION__, "Keyword RKS_TRIPLETS has been ignored for spin-polarized calculations")
       END IF
-      do_hfx = do_hfx .AND. (.NOT. tddfpt_control%rks_triplets)
-      do_hfx_residual = do_hfx .AND. tddfpt_control%hfx_residual
 
       ! multiplicity of molecular system
       IF (nspins > 1) THEN
@@ -469,6 +468,7 @@ MODULE qs_tddfpt5_methods
       CALL cp_add_iter_level(logger%iter_info, "TDDFT_SCF")
 
       niters = tddfpt_control%niters
+      is_restarted = .FALSE.
       t1 = m_walltime()
 
       DO iter = 1,niters
@@ -481,17 +481,17 @@ MODULE qs_tddfpt5_methods
                                         gs_mos=gs_mos, qs_env=qs_env, matrix_ks=matrix_ks, matrix_s=matrix_s(1)%matrix, &
                                         xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, xc_section=xc_section)
 
-         CALL tddfpt_compute_ritz_vects(ritz_vects=ritz_vects(:,1:nvects_new), Aop_ritz=Aop_ritz(:,1:nvects_new), &
+         CALL tddfpt_compute_ritz_vects(ritz_vects=ritz_vects(:,1:nstates), Aop_ritz=Aop_ritz(:,1:nstates), &
                                         evals=evals_last(1:nvects_exists+nvects_new), &
                                         Aop_evects=Aop_evects(:,1:nvects_exists+nvects_new), &
                                         K_ia_munu=K_ia_munu(:,1:nvects_new), &
                                         evects=evects(:,1:nvects_exists+nvects_new), gs_mos=gs_mos)
 
          conv = MAXVAL(ABS(evals_last(1:nstates)-evals_prev(1:nstates)))
-         IF (conv > tddfpt_control%conv) THEN
+         IF (conv > tddfpt_control%conv .OR. .NOT. is_restarted) THEN
             ! expand the active space
             nvects_exists = nvects_exists + nvects_new
-            IF (nvects_exists < max_krylov_vects) THEN
+            IF (nvects_exists < max_krylov_vects .AND. conv > tddfpt_control%conv) THEN
 
                IF (nvects_exists + nvects_new > max_krylov_vects) &
                   nvects_new = max_krylov_vects - nvects_exists
@@ -506,15 +506,22 @@ MODULE qs_tddfpt5_methods
                                                   evects=ritz_vects(:,1:nvects_new), gs_mos=gs_mos, guess_vectors=guess_vectors,&
                                                   matrix_s=matrix_s(1)%matrix)
 
-               CALL tddfpt_orthogonalize_psi1_psi0(evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), S_C0_C0T=S_C0_C0T)
-               CALL tddfpt_orthonormalize_psi1_psi1(evects=evects(:,1:nvects_exists+nvects_new), nvects_new=nvects_new, &
-                                                     matrix_s=matrix_s(1)%matrix)
-               is_nonortho = tddfpt_is_nonorthogonal_psi1_psi0(evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), &
-                                                         S_C0=S_C0, max_norm=tddfpt_control%orthogonal_eps)
+               DO istate = tddfpt_control%nreortho,1,-1
+                  CALL tddfpt_orthogonalize_psi1_psi0(evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), &
+                                                      S_C0_C0T=S_C0_C0T)
+                  CALL tddfpt_orthonormalize_psi1_psi1(evects=evects(:,1:nvects_exists+nvects_new), nvects_new=nvects_new, &
+                                                       matrix_s=matrix_s(1)%matrix)
+                  is_nonortho = tddfpt_is_nonorthogonal_psi1_psi0(evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), &
+                                                                  S_C0=S_C0, max_norm=tddfpt_control%orthogonal_eps)
+                  IF (.NOT. is_nonortho) EXIT
+               END DO
+            ELSE
+               is_nonortho = .FALSE.
             END IF
 
             ! restart
-            IF (nvects_exists >= max_krylov_vects .OR. is_nonortho) THEN
+            IF (nvects_exists >= max_krylov_vects .OR. is_nonortho .OR. &
+                (conv <= tddfpt_control%conv .AND. .NOT. is_restarted)) THEN
                DO istate = 1,nstates
                   DO ispin = 1,nspins
                      CALL cp_fm_to_fm(ritz_vects(ispin,istate)%matrix, evects(ispin,istate)%matrix)
@@ -532,6 +539,8 @@ MODULE qs_tddfpt5_methods
 
                nvects_exists = 0
                nvects_new    = nstates
+               IF (conv > tddfpt_control%conv) &
+                  is_restarted  = .TRUE.
             END IF
          END IF
 
@@ -566,10 +575,13 @@ MODULE qs_tddfpt5_methods
          evals_prev(1:nstates) = evals_last(1:nstates)
 
          IF (conv <= tddfpt_control%conv) THEN
-            CALL cp_iterate(logger%iter_info, last=.TRUE., iter_nr=iter)
-            EXIT
+            IF (is_restarted) THEN
+               CALL cp_iterate(logger%iter_info, last=.TRUE., iter_nr=iter)
+               EXIT
+            ELSE
+               is_restarted = .TRUE.
+            END IF
          END IF
-
       END DO
 
       CALL cp_rm_iter_level(logger%iter_info, "TDDFT_SCF")
@@ -589,7 +601,10 @@ MODULE qs_tddfpt5_methods
 
       ! print summary information
       log_unit = cp_logger_get_default_io_unit()
-      CALL tddfpt_print_summary(log_unit=log_unit, evects=evects(:,1:nstates), evals=evals_last(1:nstates), &
+      CALL tddfpt_orthogonalize_psi1_psi0(evects=ritz_vects(:,1:nstates), S_C0_C0T=S_C0_C0T)
+      CALL tddfpt_orthonormalize_psi1_psi1(evects=ritz_vects(:,1:nstates), nvects_new=nstates, matrix_s=matrix_s(1)%matrix)
+
+      CALL tddfpt_print_summary(log_unit=log_unit, evects=ritz_vects(:,1:nstates), evals=evals_last(1:nstates), &
                                 mult=mult, gs_mos=gs_mos, matrix_s=matrix_s, &
                                 min_amplitude=tddfpt_control%min_excitation_amplitude)
 
@@ -1971,7 +1986,7 @@ MODULE qs_tddfpt5_methods
 
       INTEGER :: handle, nrvs, nkvs, ivect, jvect, ispin, nspins, nao
       INTEGER, ALLOCATABLE, DIMENSION(:) :: nmo_occ
-      REAL(kind=dp) :: act, trace
+      REAL(kind=dp) :: act, trace, alpha_hfx
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:)         :: Atilde
       LOGICAL                                            :: do_hfx
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
@@ -2014,6 +2029,12 @@ MODULE qs_tddfpt5_methods
          CALL cp_fm_get_info(K_ia_munu(1,1)%matrix, matrix_struct=fm_struct)
          CALL cp_fm_create(rho_jb_fm, fm_struct)
 
+         IF (nspins > 1) THEN
+            alpha_hfx = 2.0_dp
+         ELSE
+            alpha_hfx = 4.0_dp
+         END IF
+
          DO ivect = 1,nkvs
             DO ispin = 1,nspins
                CALL cp_gemm('N', 'T', nao, nao, nmo_occ(ispin), 1.0_dp, &
@@ -2022,7 +2043,7 @@ MODULE qs_tddfpt5_methods
                DO jvect = 1,ivect
                   CALL cp_fm_trace(K_ia_munu(ispin, jvect)%matrix, rho_jb_fm, trace)
                   ! alpha = 4.0_dp due to closed-shell orbitals
-                  Atilde(jvect, ivect) = Atilde(jvect, ivect) + 4.0_dp * trace
+                  Atilde(jvect, ivect) = Atilde(jvect, ivect) + alpha_hfx * trace
                END DO
             END DO
          END DO
@@ -2094,7 +2115,7 @@ MODULE qs_tddfpt5_methods
 
       INTEGER :: handle, ispin, nspins, nkvs, irv, nrvs, istate, nstates_total, imo_occ, imo_virt, nao
       INTEGER, ALLOCATABLE, DIMENSION(:) :: nmo_occ
-      REAL(kind=dp) :: eref, minus_lambda, weight, K_ia_jb
+      REAL(kind=dp) :: eref, minus_lambda, weight, K_ia_jb, alpha_hfx
       LOGICAL                                            :: do_hfx
 
       TYPE(cp_fm_struct_type), POINTER                :: fm_struct
@@ -2109,6 +2130,11 @@ MODULE qs_tddfpt5_methods
       nrvs   = SIZE(residual_vects, 2)
       nstates_total = SIZE(guess_vectors%evals)
       do_hfx = ASSOCIATED(K_ia_munu(1,1)%matrix)
+      IF (nspins > 1) THEN
+         alpha_hfx = 2.0_dp
+      ELSE
+         alpha_hfx = 4.0_dp
+      END IF
 
       IF (nrvs > 0) THEN
          DO istate = 1,nrvs
@@ -2176,8 +2202,7 @@ MODULE qs_tddfpt5_methods
                CALL cp_fm_trace(gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, Ab_cols(ispin)%vects(imo_occ)%matrix, weight)
 
                IF (do_hfx) THEN
-    ! alpha = 4.0 singlets
-                  CALL cp_gemm('N', 'T', nao, nao, 1, 4.0_dp, gs_mos(ispin)%vectors_mo_occ(imo_occ)%matrix, &
+                  CALL cp_gemm('N', 'T', nao, nao, 1, alpha_hfx, gs_mos(ispin)%vectors_mo_occ(imo_occ)%matrix, &
                                gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, 0.0_dp, rho_jb_fm)
 
                   CALL cp_fm_trace(rho_jb_fm, K_ia_munu(ispin, irv)%matrix, K_ia_jb)
