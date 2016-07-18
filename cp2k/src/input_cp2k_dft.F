@@ -4143,16 +4143,16 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="MAX_KV", &
-                          description="Maximal number of Krylov space vectors. "//&
-                                      "Davidson iterations will be restarted upon reaching this limit.", &
+                          description="Maximal number of Krylov space vectors. "// &
+                          "Davidson iterations will be restarted upon reaching this limit.", &
                           n_var=1, type_of_var=integer_t, &
                           default_i_val=1000)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="MAX_REORTHO", &
-                          description="Maximal number of orthogonalisation iterations. "//&
-                                      "Davidson iterations will be restarted if orthogonality will not been reached.", &
+                          description="Maximal number of orthogonalisation iterations. "// &
+                          "Davidson iterations will be restarted if orthogonality will not been reached.", &
                           n_var=1, type_of_var=integer_t, &
                           default_i_val=1)
       CALL section_add_keyword(section, keyword)
@@ -4181,9 +4181,9 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="ORTHOGONAL_EPS", &
-                          description="The largest possible overlap between the ground state and excited state wave-functions. "//&
-                                      "Davidson iterations will be restarted when the overlap goes beyond this threshold "//&
-                                      "in order to prevent numerical instability.", &
+                          description="The largest possible overlap between the ground state and excited state wave-functions. "// &
+                          "Davidson iterations will be restarted when the overlap goes beyond this threshold "// &
+                          "in order to prevent numerical instability.", &
                           n_var=1, type_of_var=real_t, &
                           default_r_val=1.0e-4_dp)
       CALL section_add_keyword(section, keyword)
@@ -4198,9 +4198,9 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="HFX_RESIDUAL", &
-                          description="Take into account exact exchange terms while expanding Krylov space. "//&
-                                      "This could potentially reduce the number of Davidson iterations at "//&
-                                      "some additional computational costs. Make sense for hybrid functionals only.", &
+                          description="Take into account exact exchange terms while expanding Krylov space. "// &
+                          "This could potentially reduce the number of Davidson iterations at "// &
+                          "some additional computational costs. Make sense for hybrid functionals only.", &
                           n_var=1, type_of_var=logical_t, &
                           default_l_val=.FALSE.)
       CALL section_add_keyword(section, keyword)

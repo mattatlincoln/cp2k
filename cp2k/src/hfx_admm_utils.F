@@ -12,85 +12,81 @@
 !> \author MI
 ! **************************************************************************************************
 MODULE hfx_admm_utils
-  USE admm_dm_types,                   ONLY: admm_dm_create,&
-                                             admm_dm_type
-  USE admm_methods,                    ONLY: scale_dm
-  USE admm_types,                      ONLY: admm_env_create,&
-                                             admm_type
-  USE atomic_kind_types,               ONLY: atomic_kind_type
-  USE cell_types,                      ONLY: cell_type
-  USE cp_control_types,                ONLY: dft_control_type
-  USE cp_dbcsr_interface,              ONLY: cp_dbcsr_add,&
-                                             cp_dbcsr_copy,&
-                                             cp_dbcsr_p_type,&
-                                             cp_dbcsr_set,&
-                                             cp_dbcsr_type
-  USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
-  USE cp_fm_types,                     ONLY: cp_fm_get_info,&
-                                             cp_fm_type
-  USE cp_log_handling,                 ONLY: cp_get_default_logger,&
-                                             cp_logger_type
-  USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
-                                             cp_print_key_unit_nr
-  USE cp_para_types,                   ONLY: cp_para_env_type
-  USE hfx_derivatives,                 ONLY: derivatives_four_center
-  USE hfx_energy_potential,            ONLY: integrate_four_center
-  USE input_constants,                 ONLY: &
-       do_admm_aux_exch_func_bee, do_admm_aux_exch_func_default, &
-       do_admm_aux_exch_func_none, do_admm_aux_exch_func_opt, &
-       do_admm_aux_exch_func_pbex, do_hfx_potential_coulomb, &
-       do_hfx_potential_short, do_hfx_potential_truncated, &
-       xc_funct_no_shortcut
-  USE input_section_types,             ONLY: section_vals_duplicate,&
-                                             section_vals_get,&
-                                             section_vals_get_subs_vals,&
-                                             section_vals_get_subs_vals2,&
-                                             section_vals_remove_values,&
-                                             section_vals_type,&
-                                             section_vals_val_get,&
-                                             section_vals_val_set
-  USE kinds,                           ONLY: dp
-  USE particle_types,                  ONLY: particle_type
-  USE pw_env_types,                    ONLY: pw_env_get,&
-                                             pw_env_type
-  USE pw_methods,                      ONLY: pw_transfer
-  USE pw_poisson_methods,              ONLY: pw_poisson_solve
-  USE pw_poisson_types,                ONLY: pw_poisson_type
-  USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
-                                             pw_pool_give_back_pw,&
-                                             pw_pool_type
-  USE pw_types,                        ONLY: COMPLEXDATA1D,&
-                                             REALDATA3D,&
-                                             REALSPACE,&
-                                             RECIPROCALSPACE,&
-                                             pw_create,&
-                                             pw_p_type,&
-                                             pw_release
-  USE qs_collocate_density,            ONLY: calculate_wavefunction
-  USE qs_energy_types,                 ONLY: qs_energy_type
-  USE qs_environment_types,            ONLY: get_qs_env,&
-                                             qs_environment_type,&
-                                             set_qs_env
-  USE qs_force_types,                  ONLY: qs_force_type
-  USE qs_kind_types,                   ONLY: qs_kind_type
-  USE qs_kpp1_env_types,               ONLY: qs_kpp1_env_type
-  USE qs_ks_types,                     ONLY: qs_ks_env_type,&
-                                             set_ks_env
-  USE qs_mo_types,                     ONLY: get_mo_set,&
-                                             mo_set_p_type
-  USE qs_rho_types,                    ONLY: qs_rho_get,&
-                                             qs_rho_type
-  USE rt_propagation_types,            ONLY: rt_prop_type
-  USE virial_types,                    ONLY: virial_type
-  USE xc_adiabatic_utils,              ONLY: rescale_xc_potential
+   USE admm_dm_types,                   ONLY: admm_dm_create,&
+                                              admm_dm_type
+   USE admm_methods,                    ONLY: scale_dm
+   USE admm_types,                      ONLY: admm_env_create,&
+                                              admm_type
+   USE atomic_kind_types,               ONLY: atomic_kind_type
+   USE cell_types,                      ONLY: cell_type
+   USE cp_control_types,                ONLY: dft_control_type
+   USE cp_dbcsr_interface,              ONLY: cp_dbcsr_add,&
+                                              cp_dbcsr_p_type,&
+                                              cp_dbcsr_set,&
+                                              cp_dbcsr_type
+   USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
+   USE cp_fm_types,                     ONLY: cp_fm_get_info,&
+                                              cp_fm_type
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_type
+   USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
+                                              cp_print_key_unit_nr
+   USE cp_para_types,                   ONLY: cp_para_env_type
+   USE hfx_derivatives,                 ONLY: derivatives_four_center
+   USE hfx_energy_potential,            ONLY: integrate_four_center
+   USE input_constants,                 ONLY: &
+        do_admm_aux_exch_func_bee, do_admm_aux_exch_func_default, do_admm_aux_exch_func_none, &
+        do_admm_aux_exch_func_opt, do_admm_aux_exch_func_pbex, do_hfx_potential_coulomb, &
+        do_hfx_potential_short, do_hfx_potential_truncated, xc_funct_no_shortcut
+   USE input_section_types,             ONLY: section_vals_duplicate,&
+                                              section_vals_get,&
+                                              section_vals_get_subs_vals,&
+                                              section_vals_get_subs_vals2,&
+                                              section_vals_remove_values,&
+                                              section_vals_type,&
+                                              section_vals_val_get,&
+                                              section_vals_val_set
+   USE kinds,                           ONLY: dp
+   USE particle_types,                  ONLY: particle_type
+   USE pw_env_types,                    ONLY: pw_env_get,&
+                                              pw_env_type
+   USE pw_methods,                      ONLY: pw_transfer
+   USE pw_poisson_methods,              ONLY: pw_poisson_solve
+   USE pw_poisson_types,                ONLY: pw_poisson_type
+   USE pw_pool_types,                   ONLY: pw_pool_create_pw,&
+                                              pw_pool_give_back_pw,&
+                                              pw_pool_type
+   USE pw_types,                        ONLY: COMPLEXDATA1D,&
+                                              REALDATA3D,&
+                                              REALSPACE,&
+                                              RECIPROCALSPACE,&
+                                              pw_create,&
+                                              pw_p_type,&
+                                              pw_release
+   USE qs_collocate_density,            ONLY: calculate_wavefunction
+   USE qs_energy_types,                 ONLY: qs_energy_type
+   USE qs_environment_types,            ONLY: get_qs_env,&
+                                              qs_environment_type,&
+                                              set_qs_env
+   USE qs_force_types,                  ONLY: qs_force_type
+   USE qs_kind_types,                   ONLY: qs_kind_type
+   USE qs_ks_types,                     ONLY: qs_ks_env_type,&
+                                              set_ks_env
+   USE qs_mo_types,                     ONLY: get_mo_set,&
+                                              mo_set_p_type
+   USE qs_rho_types,                    ONLY: qs_rho_get,&
+                                              qs_rho_type
+   USE rt_propagation_types,            ONLY: rt_prop_type
+   USE virial_types,                    ONLY: virial_type
+   USE xc_adiabatic_utils,              ONLY: rescale_xc_potential
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
 
    PRIVATE
 
-  ! *** Public subroutines ***
-  PUBLIC :: hfx_ks_matrix, hfx_admm_init, create_admm_xc_section, tddft_hfx_matrix
+   ! *** Public subroutines ***
+   PUBLIC :: hfx_ks_matrix, hfx_admm_init, create_admm_xc_section, tddft_hfx_matrix
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'hfx_admm_utils'
 
@@ -931,92 +927,78 @@ CONTAINS
 !> \brief Add the hfx contributions to the Hamiltonian
 !>
 !> \param qs_env ...
-!> \param matrix_ks ...
 !> \param rho ...
-!> \param energy ...
-!> \param calculate_forces ...
-!> \param just_energy ...
-!> \param v_rspace_new ...
-!> \param v_tau_rspace ...
-!> \par History
-!>     refactoring 03-2011 [MI]
-! *****************************************************************************
+!> \param K_ia_munu ...
+!> \note
+!>     Simplified version of subroutine hfx_ks_matrix()
+! **************************************************************************************************
 
-  SUBROUTINE tddft_hfx_matrix(qs_env,rho,K_ia_munu)
+   SUBROUTINE tddft_hfx_matrix(qs_env, rho, K_ia_munu)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(qs_rho_type), POINTER                         :: rho
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: K_ia_munu
 
-    TYPE(qs_environment_type), POINTER       :: qs_env
-    TYPE(qs_rho_type), POINTER               :: rho
-    TYPE(cp_dbcsr_p_type), DIMENSION(:), &
-         POINTER                             :: K_ia_munu
-    TYPE(qs_energy_type), POINTER            :: energy
-    CHARACTER(LEN=*), PARAMETER :: routineN = 'tddft_hfx_matrix', &
-      routineP = moduleN//':'//routineN
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'tddft_hfx_matrix', &
+         routineP = moduleN//':'//routineN
 
-    INTEGER                                  :: handle,  irep, &
-                                                ispin, mspin, n_rep_hf, &
-                                                nimages, nspins
-    LOGICAL :: distribute_fock_matrix,&
-      hfx_treat_lsd_in_core, s_mstruct_changed, do_hfx
-    TYPE(cp_dbcsr_p_type), DIMENSION(:, :), &
-      POINTER                                :: rho_ao_orb,&
-                                                matrix_v_hfx_2d
-    TYPE(cp_para_env_type), POINTER          :: para_env
-    TYPE(dft_control_type), POINTER          :: dft_control
-    TYPE(pw_env_type), POINTER               :: pw_env
-    TYPE(pw_poisson_type), POINTER           :: poisson_env
-    TYPE(section_vals_type), POINTER         :: hfx_sections, input
+      INTEGER                                            :: handle, irep, ispin, mspin, n_rep_hf, &
+                                                            nimages, nspins
+      LOGICAL                                            :: distribute_fock_matrix, do_hfx, &
+                                                            hfx_treat_lsd_in_core, &
+                                                            s_mstruct_changed
+      TYPE(cp_dbcsr_p_type), DIMENSION(:, :), POINTER    :: matrix_v_hfx_2d, rho_ao_orb
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(pw_env_type), POINTER                         :: pw_env
+      TYPE(qs_energy_type), POINTER                      :: energy
+      TYPE(section_vals_type), POINTER                   :: hfx_sections, input
 
-    CALL timeset(routineN, handle)
+      CALL timeset(routineN, handle)
 
-    NULLIFY(dft_control, hfx_sections, input, &
-         para_env, poisson_env, pw_env, &
-         rho_ao_orb, matrix_v_hfx_2d)
+      NULLIFY (dft_control, hfx_sections, input, para_env, pw_env, &
+               rho_ao_orb, matrix_v_hfx_2d)
 
-    CALL get_qs_env(qs_env=qs_env,&
-         dft_control=dft_control,&
-         energy=energy,&
-         input=input,&
-         para_env=para_env,&
-         pw_env=pw_env,&
-         s_mstruct_changed=s_mstruct_changed)
+      CALL get_qs_env(qs_env=qs_env, &
+                      dft_control=dft_control, &
+                      energy=energy, &
+                      input=input, &
+                      para_env=para_env, &
+                      pw_env=pw_env, &
+                      s_mstruct_changed=s_mstruct_changed)
 
-    hfx_sections => section_vals_get_subs_vals(input,"DFT%XC%HF")
-    CALL section_vals_get(hfx_sections,explicit=do_hfx)
-    IF(do_hfx) THEN
+      hfx_sections => section_vals_get_subs_vals(input, "DFT%XC%HF")
+      CALL section_vals_get(hfx_sections, explicit=do_hfx)
 
-       nspins=dft_control%nspins
-       nimages=dft_control%nimages
+      IF (do_hfx) THEN
+         nspins = dft_control%nspins
+         nimages = dft_control%nimages
 
-       CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
-       CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core,&
-                                 i_rep_section=1)
- 
-       CALL section_vals_get(hfx_sections,n_repetition=n_rep_hf)
-       distribute_fock_matrix = .TRUE.
+         CALL section_vals_get(hfx_sections, n_repetition=n_rep_hf)
+         CALL section_vals_val_get(hfx_sections, "TREAT_LSD_IN_CORE", l_val=hfx_treat_lsd_in_core, &
+                                   i_rep_section=1)
 
-       mspin=1
-       IF ( hfx_treat_lsd_in_core ) mspin=nspins
+         CALL section_vals_get(hfx_sections, n_repetition=n_rep_hf)
+         distribute_fock_matrix = .TRUE.
 
-       matrix_v_hfx_2d(1:nspins, 1:1) => K_ia_munu(1:nspins)
+         mspin = 1
+         IF (hfx_treat_lsd_in_core) mspin = nspins
 
-       DO irep = 1,n_rep_hf
-       
-          CALL qs_rho_get(rho_struct=rho,rho_ao_kp=rho_ao_orb)
+         matrix_v_hfx_2d(1:nspins, 1:1) => K_ia_munu(1:nspins)
 
-          ! the real hfx calulation
-          DO ispin = 1,mspin
-             energy%ex = 0.0
-             CALL integrate_four_center(qs_env,matrix_v_hfx_2d,energy,rho_ao_orb,hfx_sections,&
-                                        para_env,s_mstruct_changed,irep,distribute_fock_matrix,&
-                                        ispin=ispin)
+         DO irep = 1, n_rep_hf
+            CALL qs_rho_get(rho_struct=rho, rho_ao_kp=rho_ao_orb)
 
-          END DO
-       END DO
+            ! the real hfx calulation
+            DO ispin = 1, mspin
+               energy%ex = 0.0
+               CALL integrate_four_center(qs_env, matrix_v_hfx_2d, energy, rho_ao_orb, hfx_sections, &
+                                          para_env, s_mstruct_changed, irep, distribute_fock_matrix, &
+                                          ispin=ispin)
+            END DO
+         END DO
+      END IF
 
-    END IF
-
-    CALL timestop(handle)
-
-  END SUBROUTINE  tddft_hfx_matrix
+      CALL timestop(handle)
+   END SUBROUTINE tddft_hfx_matrix
 
 END MODULE hfx_admm_utils
