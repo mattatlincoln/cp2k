@@ -158,6 +158,26 @@ MODULE qs_tddfpt5_methods
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: evals
    END TYPE tddfpt_guess_vectors
 
+! **************************************************************************************************
+!> \brief Allocatable list of full matrices
+!> \par History
+!>   * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
+   TYPE tddfpt_fm_vectors
+      !> allocatable list of full matrices
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:) :: vects
+   END TYPE tddfpt_fm_vectors
+
+! **************************************************************************************************
+!> \brief Allocatable 2-D matrix
+!> \par History
+!>   * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
+   TYPE tddfpt_allocatable_matrix
+      !> allocatable 2-D matrix
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:) :: matrix
+   END TYPE tddfpt_allocatable_matrix
+
    CONTAINS
 
 ! **************************************************************************************************
@@ -177,7 +197,7 @@ MODULE qs_tddfpt5_methods
 
       CHARACTER(len=20)                                  :: navail_str, nstates_str
       INTEGER :: handle, energy_unit, log_unit, ispin, nspins, nstates, nstates_total, istate, nao, max_krylov_vects, &
-                 nvects_new, nvects_exists, iter, niters, nstates_conv
+                 nvects_new, nvects_exists, iter, niters, nstates_conv, mult
       INTEGER(kind=int_8) :: nstates_total_i8
       LOGICAL :: do_hfx, do_hfx_residual, is_nonortho
       REAL(kind=dp) :: C_hf, t1, t2, conv
@@ -237,10 +257,6 @@ MODULE qs_tddfpt5_methods
          CALL section_vals_val_get(hfx_section, "FRACTION", r_val=C_hf)
          do_hfx = (C_hf /= 0.0_dp)
       END IF
-      do_hfx_residual = do_hfx .AND. tddfpt_control%hfx_residual
-!      IF (dft_control%nspins > 1) &
-!         CPABORT("TDDFPT is currently implemented for restricted molecular orbitals only")
-     
 
       nspins = dft_control%nspins
 
@@ -279,6 +295,21 @@ MODULE qs_tddfpt5_methods
          tddfpt_control%rks_triplets = .FALSE.
          CALL cp_warn(__LOCATION__, "Keyword RKS_TRIPLETS has been ignored for spin-polarized calculations")
       END IF
+      do_hfx = do_hfx .AND. (.NOT. tddfpt_control%rks_triplets)
+      do_hfx_residual = do_hfx .AND. tddfpt_control%hfx_residual
+
+      ! multiplicity of molecular system
+      IF (nspins > 1) THEN
+         mult = ABS(SIZE(gs_mos(1)%evals_occ) - SIZE(gs_mos(2)%evals_occ)) + 1
+         IF (mult > 2) &
+            CALL cp_warn(__LOCATION__, "There is a convergence issue for multiplicity >= 3")
+      ELSE
+         IF (tddfpt_control%rks_triplets) THEN
+            mult = 3
+         ELSE
+            mult = 1
+         END IF
+      END IF
 
       log_unit = cp_print_key_unit_nr(logger, tddfpt_section, "PRINT%GUESS_VECTORS", extension=".tddfptLog")
       CALL tddfpt_init_guess_vectors(guess_vectors=guess_vectors, nstates=nstates, &
@@ -307,8 +338,6 @@ MODULE qs_tddfpt5_methods
       DO istate = 1,max_krylov_vects
          DO ispin = 1,nspins
             NULLIFY(evects(ispin, istate)%matrix, Aop_evects(ispin, istate)%matrix)
-            CALL cp_fm_create(evects(ispin, istate)%matrix, gs_mos(ispin)%matrix_mos_occ%matrix_struct)
-            CALL cp_fm_create(Aop_evects(ispin, istate)%matrix, gs_mos(ispin)%matrix_mos_occ%matrix_struct)
          END DO
       END DO
 
@@ -316,6 +345,9 @@ MODULE qs_tddfpt5_methods
       ALLOCATE (Aop_ritz(nspins, nstates))
       DO istate = 1,nstates
          DO ispin = 1,nspins
+            ! allocate few initial trial vectors, other vectors will be allocated during Krylov's space expansion
+            CALL cp_fm_create(evects(ispin, istate)%matrix, gs_mos(ispin)%matrix_mos_occ%matrix_struct)
+
             NULLIFY(ritz_vects(ispin, istate)%matrix, Aop_ritz(ispin, istate)%matrix)
             CALL cp_fm_create(ritz_vects(ispin, istate)%matrix, gs_mos(ispin)%matrix_mos_occ%matrix_struct)
             CALL cp_fm_create(Aop_ritz(ispin, istate)%matrix, gs_mos(ispin)%matrix_mos_occ%matrix_struct)
@@ -335,10 +367,10 @@ MODULE qs_tddfpt5_methods
       DO istate = 1,max_krylov_vects
          DO ispin = 1,nspins
             NULLIFY(K_ia_munu(ispin, istate)%matrix)
-            IF (do_hfx) &
-               CALL cp_fm_create(K_ia_munu(ispin, istate)%matrix, fm_struct)
          END DO
       END DO
+      IF (do_hfx) &
+         CALL cp_fm_create(K_ia_munu(1,1)%matrix, fm_struct)
 
       ALLOCATE(K_ia_ritz(nspins, nstates))
       DO istate = 1,nstates
@@ -445,20 +477,19 @@ MODULE qs_tddfpt5_methods
          CALL tddfpt_compute_Aop_evects(Aop_evects=Aop_evects(:,nvects_exists+1:nvects_exists+nvects_new), &
                                         K_ia_munu=K_ia_munu(:,nvects_exists+1:nvects_exists+nvects_new), &
                                         evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), &
-                                        is_rks_triplets=tddfpt_control%rks_triplets, do_hfx=do_hfx, gs_mos=gs_mos, &
-                                        qs_env=qs_env, matrix_ks=matrix_ks, matrix_s=matrix_s(1)%matrix, &
+                                        is_rks_triplets=tddfpt_control%rks_triplets, K_ia_template=K_ia_munu(1,1)%matrix, &
+                                        gs_mos=gs_mos, qs_env=qs_env, matrix_ks=matrix_ks, matrix_s=matrix_s(1)%matrix, &
                                         xc_rho_set=xc_rho_set, xc_deriv_set=xc_deriv_set, xc_section=xc_section)
 
          CALL tddfpt_compute_ritz_vects(ritz_vects=ritz_vects(:,1:nvects_new), Aop_ritz=Aop_ritz(:,1:nvects_new), &
                                         evals=evals_last(1:nvects_exists+nvects_new), &
                                         Aop_evects=Aop_evects(:,1:nvects_exists+nvects_new), &
                                         K_ia_munu=K_ia_munu(:,1:nvects_new), &
-                                        evects=evects(:,1:nvects_exists+nvects_new), gs_mos=gs_mos, do_hfx=do_hfx)
+                                        evects=evects(:,1:nvects_exists+nvects_new), gs_mos=gs_mos)
 
          conv = MAXVAL(ABS(evals_last(1:nstates)-evals_prev(1:nstates)))
          IF (conv > tddfpt_control%conv) THEN
             ! expand the active space
-
             nvects_exists = nvects_exists + nvects_new
             IF (nvects_exists < max_krylov_vects) THEN
 
@@ -473,7 +504,7 @@ MODULE qs_tddfpt5_methods
                                                   evals=evals_last(1:nvects_new), Aop_evects=Aop_ritz(:,1:nvects_new), &
                                                   K_ia_munu=K_ia_ritz(:,1:nvects_new), &
                                                   evects=ritz_vects(:,1:nvects_new), gs_mos=gs_mos, guess_vectors=guess_vectors,&
-                                                  do_hfx=do_hfx_residual, matrix_s=matrix_s(1)%matrix)
+                                                  matrix_s=matrix_s(1)%matrix)
 
                CALL tddfpt_orthogonalize_psi1_psi0(evects=evects(:,nvects_exists+1:nvects_exists+nvects_new), S_C0_C0T=S_C0_C0T)
                CALL tddfpt_orthonormalize_psi1_psi1(evects=evects(:,1:nvects_exists+nvects_new), nvects_new=nvects_new, &
@@ -556,6 +587,12 @@ MODULE qs_tddfpt5_methods
       CALL cp_print_key_finished_output(energy_unit, logger, tddfpt_section, "PRINT%DETAILED_ENERGY")
       CALL cp_print_key_finished_output(log_unit, logger, tddfpt_section, "PRINT%ITERATION_INFO")
 
+      ! print summary information
+      log_unit = cp_logger_get_default_io_unit()
+      CALL tddfpt_print_summary(log_unit=log_unit, evects=evects(:,1:nstates), evals=evals_last(1:nstates), &
+                                mult=mult, gs_mos=gs_mos, matrix_s=matrix_s, &
+                                min_amplitude=tddfpt_control%min_excitation_amplitude)
+
 
       ! -- clean up all useless stuff
       DEALLOCATE(evals_prev)
@@ -597,8 +634,10 @@ MODULE qs_tddfpt5_methods
 
       DO istate = SIZE(evects, 2),1,-1
          DO ispin = nspins,1,-1
-            CALL cp_fm_release(Aop_evects(ispin, istate)%matrix)
-            CALL cp_fm_release(evects(ispin, istate)%matrix)
+            IF (ASSOCIATED(Aop_evects(ispin, istate)%matrix)) &
+               CALL cp_fm_release(Aop_evects(ispin, istate)%matrix)
+            IF (ASSOCIATED(evects(ispin, istate)%matrix)) &
+               CALL cp_fm_release(evects(ispin, istate)%matrix)
          END DO
       END DO
       DEALLOCATE(Aop_evects)
@@ -907,7 +946,7 @@ MODULE qs_tddfpt5_methods
          ispin = 1
 
          spin_virt = 'a'
-         IF (is_rks_triplets) THEN 
+         IF (is_rks_triplets) THEN
             spin_occ = 'b'
          ELSE
             spin_occ = 'a'
@@ -1080,8 +1119,8 @@ MODULE qs_tddfpt5_methods
 !> \note  Based on the subroutine p_preortho() which was created by Thomas Chassaing on 09.2002.
 !>        Should be useless when the ground states MOs are computed with extremely high accuracy,
 !>        as all virtual orbitals are already orthogonal to the occupied ones by design.
-!>        It is vitally important, however, when the norm of residual vectors is less
-!>        then SCF_EPS. In this case, new krylov vectors seem to be random and should be
+!>        It is vitally important, however, when the norm of residual vectors is relatively small.
+!>        (e.g. less then SCF_EPS). In this case, new krylov vectors seem to be random and should be
 !>        orthogonalised even with respect to the occupied MOs.
 ! **************************************************************************************************
    SUBROUTINE tddfpt_orthogonalize_psi1_psi0(evects, S_C0_C0T)
@@ -1134,6 +1173,17 @@ MODULE qs_tddfpt5_methods
       CALL timestop(handle)
    END SUBROUTINE tddfpt_orthogonalize_psi1_psi0
 
+! **************************************************************************************************
+!> \brief Check that orthogonalised TDDFPT trial vectors remain othogonal to
+!>        occupied molecular orbitals.
+!> \param evects   trial vectors (modified on exit)
+!> \param S_C0     matrix product S * C_0, where C_0 is the ground state wave-function
+!>                 for each spin in atomic basis set, and S is the corresponding overlap matrix
+!> \param max_norm the largest possible overlap between the ground state and
+!>                 excited state wave-functions
+!> \par History
+!>    * 07.2016 created [Sergey Chulkov]
+! **************************************************************************************************
    FUNCTION tddfpt_is_nonorthogonal_psi1_psi0(evects, S_C0, max_norm) RESULT(is_nonortho)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: evects
       TYPE(cp_fm_p_type), DIMENSION(:),   INTENT(in)     :: S_C0
@@ -1282,13 +1332,13 @@ MODULE qs_tddfpt5_methods
 
 ! **************************************************************************************************
 !> \brief Initialise hat{A} C_{1,i} by energy difference using the following expression:
-!>        KS * C_{1,i,sigma} - S * C_{1,i,sigma} * diag(evals_occ) .
+!>        KS_{sigma} * C_{1,i,sigma} - S * C_{1,i,sigma} * diag(evals_occ) .
 !> \param Aop_evects  hat{A} C_{1,i} (initialised on exit)
 !> \param evects      trial vectors C_{1,i}
 !> \param gs_mos      molecular orbitals optimized for the ground state (only occupied orbital
 !>                    energies [field %evals_occ] are needed)
-!> \param matrix_ks Kohn-Sham matrix
-!> \param matrix_s  overlap matrix
+!> \param matrix_ks   Kohn-Sham matrix
+!> \param matrix_s    overlap matrix
 !> \par History
 !>    * 05.2016 initialise all matrix elements in one go [Sergey Chulkov]
 !> \note Based on the subroutine p_op_l1() which was originally created by
@@ -1347,13 +1397,12 @@ MODULE qs_tddfpt5_methods
 
 ! **************************************************************************************************
 !> \brief  Update the hat{A} C_{1,i} vectors by adding coulomb terms
-!> \param a_kv     hat{A} C_{1,i} (updated on exit)
-!> \param alpha    scale factor
-!> \param evecs    trial vectors C_{1,i}
+!> \param Aop_evects  hat{A} C_{1,i} (updated on exit)
+!> \param evects      trial vectors C_{1,i}
 !> \param gs_mos      molecular orbitals optimized for the ground state (only occupied molecular
 !>                    orbitals [field %matrix_mos_occ] are needed)
-!> \param qs_env   Quickstep environment
-!> \param matrix_s overlap matrix
+!> \param qs_env      Quickstep environment
+!> \param matrix_s    overlap matrix
 !> \par History
 !>    * 05.2016 compute all coulomb terms in one go [Sergey Chulkov]
 !> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
@@ -1496,6 +1545,24 @@ MODULE qs_tddfpt5_methods
       CALL timestop(handle)
    END SUBROUTINE tddfpt_apply_coulomb
 
+! **************************************************************************************************
+!> \brief Update the action matrix by adding kernel terms.
+!> \param Aop_evects      hat{A} C_{1,i} (updated on exit)
+!> \param evects          TDDFPT trial vectors
+!> \param gs_mos          molecular orbitals optimized for the ground state (only occupied molecular
+!>                        orbitals [field %matrix_mos_occ] are needed)
+!> \param is_rks_triplets indicates that the triplet excited states calculation using
+!>                        spin-unpolarised molecular orbitals has been requested
+!> \param xc_rho_set      a variable to compute the 2nd derivative of XC-functional
+!> \param xc_deriv_set    a variable to compute the 2nd derivative of XC-functional
+!> \param qs_env          Quickstep environment
+!> \param matrix_s        overlap matrix
+!> \param xc_section      XC input section
+!> \par History
+!>    * 05.2016 compute all kernel terms in one go [Sergey Chulkov]
+!> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
+!>       Mohamed Fawzi on 10.2002.
+! **************************************************************************************************
    SUBROUTINE tddfpt_apply_kernel(Aop_evects, evects, gs_mos, is_rks_triplets, &
                                   xc_rho_set, xc_deriv_set, qs_env, matrix_s, xc_section)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: Aop_evects
@@ -1677,14 +1744,13 @@ MODULE qs_tddfpt5_methods
    END SUBROUTINE tddfpt_apply_kernel
 
 ! **************************************************************************************************
-!> \brief  Update the hat{A} C_{1,i} vectors by adding exact exchange terms
-!> \param a_kv     hat{A} C_{1,i} (updated on exit)
-!> \param alpha    scale factor
-!> \param evecs    trial vectors C_{1,i}
-!> \param gs_mos      molecular orbitals optimized for the ground state (only occupied molecular
-!>                    orbitals [field %matrix_mos_occ] are needed)
-!> \param qs_env   Quickstep environment
-!> \param matrix_s overlap matrix
+!> \brief  Compute linear combination of half-transformed four-centre integrals (mu j || nu b)
+!> \param K_ia_munu  half-transformed integrals (initialised on exit)
+!> \param evects     trial vectors C_{1,i}
+!> \param gs_mos     molecular orbitals optimized for the ground state (only occupied molecular
+!>                   orbitals [field %matrix_mos_occ] are needed)
+!> \param qs_env     Quickstep environment
+!> \param matrix_s   overlap matrix
 !> \par History
 !>    * 05.2016 compute all coulomb terms in one go [Sergey Chulkov]
 !> \note Based on the subroutine kpp1_calc_k_p_p1() which was originally created by
@@ -1793,14 +1859,34 @@ MODULE qs_tddfpt5_methods
       CALL timestop(handle)
    END SUBROUTINE tddfpt_apply_hfx
 
-   SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, K_ia_munu, evects, gs_mos, is_rks_triplets, do_hfx, &
+! **************************************************************************************************
+!> \brief Compute the action matrix -- vector product and half-transformed four-centre integrals
+!> \param Aop_evects      hat{A} C_{1,i} (allocated and initialised on exit)
+!> \param K_ia_munu       half-transformed 4-centre integrals (allocated and initialised on exit)
+!> \param evects          TDDFPT trial vectors
+!> \param gs_mos          molecular orbitals optimized for the ground state
+!> \param is_rks_triplets indicates that the triplet excited states calculation using
+!>                        spin-unpolarised molecular orbitals has been requested
+!> \param K_ia_template   a dense matrix with the same dimension as K_ia_munu
+!>                        (used as a template to allocate unalocated K_ia_munu-s;
+!>                        NULL means no exact-exchange terms are needed)
+!> \param qs_env          Quickstep environment
+!> \param matrix_ks       Kohn-Sham matrix
+!> \param matrix_s        overlap matrix
+!> \param xc_rho_set      a variable to compute the 2nd derivative of XC-functional
+!> \param xc_deriv_set    a variable to compute the 2nd derivative of XC-functional
+!> \param xc_section      XC input section
+!> \par History
+!>    * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
+   SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, K_ia_munu, evects, gs_mos, is_rks_triplets, K_ia_template, &
                                         qs_env, matrix_ks, matrix_s, xc_rho_set, xc_deriv_set, xc_section)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: Aop_evects
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: K_ia_munu
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), INTENT(in) :: gs_mos
       LOGICAL, INTENT(in)                                :: is_rks_triplets
-      LOGICAL, INTENT(in)                                :: do_hfx
+      TYPE(cp_fm_type), POINTER                          :: K_ia_template
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(cp_dbcsr_p_type), DIMENSION(:), INTENT(in)    :: matrix_ks
       TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
@@ -1811,8 +1897,7 @@ MODULE qs_tddfpt5_methods
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_compute_Aop_evects', &
          routineP = moduleN//':'//routineN
 
-      INTEGER :: handle, nvects, nspins
-!      REAL(kind=dp) :: alpha
+      INTEGER :: handle, nvects, nspins, ivect, ispin
 
       CALL timeset(routineN, handle)
 
@@ -1822,10 +1907,25 @@ MODULE qs_tddfpt5_methods
       CPASSERT(nspins > 0)
       CPASSERT(SIZE(Aop_evects, 1) == nspins)
       CPASSERT(SIZE(Aop_evects, 2) == nvects)
-!      CPASSERT(SIZE(K_ia_munu) == nvects)
       CPASSERT(SIZE(gs_mos) == nspins)
 
       IF (nvects > 0) THEN
+         DO ivect = 1,nvects
+            DO ispin = 1,nspins
+               IF (.NOT. ASSOCIATED(Aop_evects(ispin,ivect)%matrix)) &
+                  CALL cp_fm_create(Aop_evects(ispin,ivect)%matrix, evects(ispin, 1)%matrix%matrix_struct)
+            END DO
+         END DO
+
+         IF (ASSOCIATED(K_ia_template)) THEN
+            DO ivect = 1,nvects
+               DO ispin = 1,nspins
+                  IF (.NOT. ASSOCIATED(K_ia_munu(ispin,ivect)%matrix)) &
+                  CALL cp_fm_create(K_ia_munu(ispin,ivect)%matrix, K_ia_template%matrix_struct)
+               END DO
+            END DO
+         END IF
+
          CALL tddfpt_init_by_energy_diff(Aop_evects=Aop_evects, evects=evects, gs_mos=gs_mos, &
                                          matrix_ks=matrix_ks, matrix_s=matrix_s)
 
@@ -1842,18 +1942,29 @@ MODULE qs_tddfpt5_methods
                                   qs_env=qs_env, matrix_s=matrix_s, xc_section=xc_section)
 
          ! add contributions from hfx terms
-         IF (do_hfx) &
+         IF (ASSOCIATED(K_ia_template)) &
             CALL tddfpt_apply_hfx(K_ia_munu=K_ia_munu, evects=evects, gs_mos=gs_mos, qs_env=qs_env, matrix_s=matrix_s)
       END IF
       CALL timestop(handle)
    END SUBROUTINE tddfpt_compute_Aop_evects
 
-   SUBROUTINE tddfpt_compute_ritz_vects(ritz_vects, Aop_ritz, evals, Aop_evects, K_ia_munu, evects, gs_mos, do_hfx)
+! **************************************************************************************************
+!> \brief Solve eigenproblem for the reduced action matrix and find new Ritz eigenvectors and
+!>        eigenvalues.
+!> \param ritz_vects      Ritz eigenvectors (initialised on exit)
+!> \param Aop_ritz        action matrix -- Ritz vector product
+!> \param evals           Ritz eigenvalues
+!> \param Aop_evects      action matrix -- trial vector product
+!> \param evects          TDDFPT trial vectors
+!> \param gs_mos          molecular orbitals optimized for the ground state
+!> \par History
+!>    * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
+   SUBROUTINE tddfpt_compute_ritz_vects(ritz_vects, Aop_ritz, evals, Aop_evects, K_ia_munu, evects, gs_mos)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)       :: ritz_vects, Aop_ritz
       REAL(kind=dp), DIMENSION(:), INTENT(out)             :: evals
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)       :: Aop_evects, K_ia_munu, evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), INTENT(in) :: gs_mos
-      LOGICAL, INTENT(in)                                  :: do_hfx
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_compute_ritz_vects', &
          routineP = moduleN//':'//routineN
@@ -1862,6 +1973,7 @@ MODULE qs_tddfpt5_methods
       INTEGER, ALLOCATABLE, DIMENSION(:) :: nmo_occ
       REAL(kind=dp) :: act, trace
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:)         :: Atilde
+      LOGICAL                                            :: do_hfx
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_fm_type), POINTER                          :: Atilde_fm, evects_Atilde_fm, rho_jb_fm
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -1873,6 +1985,7 @@ MODULE qs_tddfpt5_methods
       nspins = SIZE(evects, 1)
       nkvs = SIZE(evects, 2)
       nrvs = SIZE(ritz_vects, 2)
+      do_hfx = ASSOCIATED(K_ia_munu(1,1)%matrix)
 
       NULLIFY(blacs_env, para_env)
       CALL cp_fm_get_info(gs_mos(1)%matrix_mos_occ, nrow_global=nao, context=blacs_env, para_env=para_env)
@@ -1939,7 +2052,6 @@ MODULE qs_tddfpt5_methods
          END DO
 
          DO jvect = 1,nkvs
-!            act = Atilde(jvect, nkvs-nrvs+ivect)
             act = Atilde(jvect, ivect)
             DO ispin = 1,nspins
                CALL cp_fm_scale_and_add(1.0_dp, ritz_vects(ispin, ivect)%matrix, act, evects(ispin, jvect)%matrix)
@@ -1952,14 +2064,27 @@ MODULE qs_tddfpt5_methods
       CALL timestop(handle)
    END SUBROUTINE tddfpt_compute_ritz_vects
 
+! **************************************************************************************************
+!> \brief Expand Krylov space by computing residual vectors.
+!> \param residual_vects  residual vectors
+!> \param evals           Ritz eigenvalues
+!> \param Aop_ritz        action matrix -- Ritz vector product
+!> \param K_ia_munu       half-transformed 4-centre integrals (or list of NULL-s HFX terms
+!>                        should not be taken into account for residual vectors)
+!> \param evects          Ritz eigenvectors
+!> \param gs_mos          molecular orbitals optimized for the ground state
+!> \param guess_vectors   initial guess vectors
+!> \param matrix_s        overlap matrix
+!> \par History
+!>    * 06.2016 created [Sergey Chulkov]
+! **************************************************************************************************
    SUBROUTINE tddfpt_compute_residual_vects(residual_vects, evals, Aop_evects, K_ia_munu, evects, &
-                                            gs_mos, guess_vectors, do_hfx, matrix_s)
+                                            gs_mos, guess_vectors, matrix_s)
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: residual_vects
       REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals
       TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: Aop_evects, K_ia_munu, evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), INTENT(in) :: gs_mos
       TYPE(tddfpt_guess_vectors), INTENT(in)             :: guess_vectors
-      LOGICAL, INTENT(in)                                :: do_hfx
       TYPE(cp_dbcsr_type), POINTER                       :: matrix_s
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_compute_residual_vects', &
@@ -1967,16 +2092,13 @@ MODULE qs_tddfpt5_methods
 
       REAL(kind=dp), PARAMETER :: threshold = 16.0_dp * EPSILON(1.0_dp), eref_scale = 0.99_dp
 
-      TYPE tddfpt_vectors
-         TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:) :: vects
-      END TYPE tddfpt_vectors
- 
       INTEGER :: handle, ispin, nspins, nkvs, irv, nrvs, istate, nstates_total, imo_occ, imo_virt, nao
       INTEGER, ALLOCATABLE, DIMENSION(:) :: nmo_occ
       REAL(kind=dp) :: eref, minus_lambda, weight, K_ia_jb
+      LOGICAL                                            :: do_hfx
 
       TYPE(cp_fm_struct_type), POINTER                :: fm_struct
-      TYPE(tddfpt_vectors), ALLOCATABLE, DIMENSION(:) :: Ab_cols, residual_cols
+      TYPE(tddfpt_fm_vectors), ALLOCATABLE, DIMENSION(:) :: Ab_cols, residual_cols
       TYPE(cp_fm_type), POINTER                       :: rho_jb_fm
       TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)   :: Ab_minus_eb
 
@@ -1986,104 +2108,381 @@ MODULE qs_tddfpt5_methods
       nkvs   = SIZE(evects, 2)
       nrvs   = SIZE(residual_vects, 2)
       nstates_total = SIZE(guess_vectors%evals)
+      do_hfx = ASSOCIATED(K_ia_munu(1,1)%matrix)
 
-      ALLOCATE (nmo_occ(nspins))
-      ALLOCATE (Ab_minus_eb(nspins))
-      DO ispin = 1,nspins
-         NULLIFY(fm_struct, Ab_minus_eb(ispin)%matrix)
-         CALL cp_fm_get_info(gs_mos(ispin)%matrix_mos_occ, ncol_global=nmo_occ(ispin), matrix_struct=fm_struct)
-         CALL cp_fm_create(Ab_minus_eb(ispin)%matrix, fm_struct)
-      END DO
-
-      ALLOCATE (Ab_cols(nspins), residual_cols(nspins))
-      DO ispin = 1,nspins
-         NULLIFY(fm_struct)
-         CALL cp_fm_get_info(gs_mos(ispin)%vectors_mo_occ(1)%matrix, matrix_struct=fm_struct)
-
-         ALLOCATE(Ab_cols(ispin)%vects(nmo_occ(ispin)))
-         ALLOCATE(residual_cols(ispin)%vects(nmo_occ(ispin)))
-         DO imo_occ = 1,nmo_occ(ispin)
-            NULLIFY(Ab_cols(ispin)%vects(imo_occ)%matrix, residual_cols(ispin)%vects(imo_occ)%matrix)
-            CALL cp_fm_create(Ab_cols(ispin)%vects(imo_occ)%matrix, fm_struct)
-            CALL cp_fm_create(residual_cols(ispin)%vects(imo_occ)%matrix, fm_struct)
-         END DO
-      END DO
-
-      NULLIFY(rho_jb_fm)
-      IF (do_hfx) THEN
-         NULLIFY(fm_struct)
-         CALL cp_fm_get_info(K_ia_munu(1,1)%matrix, nrow_global=nao, matrix_struct=fm_struct)
-         CALL cp_fm_create(rho_jb_fm, fm_struct)
-      END IF
-
-      ! +++ actually compute residual vectors +++
-      DO irv = 1,nrvs
-         minus_lambda = -evals(irv)
-         DO ispin = 1,nspins
-             CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, irv)%matrix, Ab_minus_eb(ispin)%matrix, &
-                                         ncol=nmo_occ(ispin), alpha=minus_lambda, beta=0.0_dp)
-             CALL cp_fm_scale_and_add(1.0_dp, Ab_minus_eb(ispin)%matrix, 1.0_dp, Aop_evects(ispin, irv)%matrix)
-         END DO
-
-         DO ispin = 1,nspins
-            DO imo_occ = nmo_occ(ispin),1,-1
-               CALL cp_fm_to_fm(Ab_minus_eb(ispin)%matrix, Ab_cols(ispin)%vects(imo_occ)%matrix, &
-                                ncol=1, source_start=imo_occ, target_start=1)
-               CALL cp_fm_set_all(residual_cols(ispin)%vects(imo_occ)%matrix, 0.0_dp)
+      IF (nrvs > 0) THEN
+         DO istate = 1,nrvs
+            DO ispin = 1,nspins
+               IF (.NOT. ASSOCIATED(residual_vects(ispin,istate)%matrix)) &
+                  CALL cp_fm_create(residual_vects(ispin,istate)%matrix, evects(ispin,1)%matrix%matrix_struct)
             END DO
          END DO
 
-         DO istate = 1,nstates_total
-            ispin    = guess_vectors%ispins(istate)
-            imo_occ  = guess_vectors%imos_occ(istate)
-            imo_virt = guess_vectors%imos_virt(istate)
+         ALLOCATE (nmo_occ(nspins))
+         ALLOCATE (Ab_minus_eb(nspins))
+         DO ispin = 1,nspins
+            NULLIFY(fm_struct, Ab_minus_eb(ispin)%matrix)
+            CALL cp_fm_get_info(gs_mos(ispin)%matrix_mos_occ, ncol_global=nmo_occ(ispin), matrix_struct=fm_struct)
+            CALL cp_fm_create(Ab_minus_eb(ispin)%matrix, fm_struct)
+         END DO
 
-            eref = guess_vectors%evals(istate) + minus_lambda
-            IF (ABS(eref) < threshold) &
-               eref = guess_vectors%evals(istate) + eref_scale * minus_lambda
+         ALLOCATE (Ab_cols(nspins), residual_cols(nspins))
+         DO ispin = 1,nspins
+            NULLIFY(fm_struct)
+            CALL cp_fm_get_info(gs_mos(ispin)%vectors_mo_occ(1)%matrix, matrix_struct=fm_struct)
 
-            CALL cp_fm_trace(gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, Ab_cols(ispin)%vects(imo_occ)%matrix, weight)
+            ALLOCATE(Ab_cols(ispin)%vects(nmo_occ(ispin)))
+            ALLOCATE(residual_cols(ispin)%vects(nmo_occ(ispin)))
+            DO imo_occ = 1,nmo_occ(ispin)
+               NULLIFY(Ab_cols(ispin)%vects(imo_occ)%matrix, residual_cols(ispin)%vects(imo_occ)%matrix)
+               CALL cp_fm_create(Ab_cols(ispin)%vects(imo_occ)%matrix, fm_struct)
+               CALL cp_fm_create(residual_cols(ispin)%vects(imo_occ)%matrix, fm_struct)
+            END DO
+         END DO
 
-            IF (do_hfx) THEN
+         NULLIFY(rho_jb_fm)
+         IF (do_hfx) THEN
+            NULLIFY(fm_struct)
+            CALL cp_fm_get_info(K_ia_munu(1,1)%matrix, nrow_global=nao, matrix_struct=fm_struct)
+            CALL cp_fm_create(rho_jb_fm, fm_struct)
+         END IF
+
+         ! +++ actually compute residual vectors +++
+         DO irv = 1,nrvs
+            minus_lambda = -evals(irv)
+            DO ispin = 1,nspins
+                CALL cp_dbcsr_sm_fm_multiply(matrix_s, evects(ispin, irv)%matrix, Ab_minus_eb(ispin)%matrix, &
+                                            ncol=nmo_occ(ispin), alpha=minus_lambda, beta=0.0_dp)
+                CALL cp_fm_scale_and_add(1.0_dp, Ab_minus_eb(ispin)%matrix, 1.0_dp, Aop_evects(ispin, irv)%matrix)
+            END DO
+
+            DO ispin = 1,nspins
+               DO imo_occ = nmo_occ(ispin),1,-1
+                  CALL cp_fm_to_fm(Ab_minus_eb(ispin)%matrix, Ab_cols(ispin)%vects(imo_occ)%matrix, &
+                                   ncol=1, source_start=imo_occ, target_start=1)
+                  CALL cp_fm_set_all(residual_cols(ispin)%vects(imo_occ)%matrix, 0.0_dp)
+               END DO
+            END DO
+
+            DO istate = 1,nstates_total
+               ispin    = guess_vectors%ispins(istate)
+               imo_occ  = guess_vectors%imos_occ(istate)
+               imo_virt = guess_vectors%imos_virt(istate)
+
+               eref = guess_vectors%evals(istate) + minus_lambda
+               IF (ABS(eref) < threshold) &
+                  eref = guess_vectors%evals(istate) + eref_scale * minus_lambda
+
+               CALL cp_fm_trace(gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, Ab_cols(ispin)%vects(imo_occ)%matrix, weight)
+
+               IF (do_hfx) THEN
     ! alpha = 4.0 singlets
-               CALL cp_gemm('N', 'T', nao, nao, 1, 4.0_dp, gs_mos(ispin)%vectors_mo_occ(imo_occ)%matrix, &
-                            gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, 0.0_dp, rho_jb_fm)
+                  CALL cp_gemm('N', 'T', nao, nao, 1, 4.0_dp, gs_mos(ispin)%vectors_mo_occ(imo_occ)%matrix, &
+                               gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix, 0.0_dp, rho_jb_fm)
 
-               CALL cp_fm_trace(rho_jb_fm, K_ia_munu(ispin, irv)%matrix, K_ia_jb)
-               weight = weight + K_ia_jb
-            END IF
+                  CALL cp_fm_trace(rho_jb_fm, K_ia_munu(ispin, irv)%matrix, K_ia_jb)
+                  weight = weight + K_ia_jb
+               END IF
 
             weight = weight / eref
             CALL cp_fm_scale_and_add(1.0_dp, residual_cols(ispin)%vects(imo_occ)%matrix, &
                                      weight, gs_mos(ispin)%vectors_mo_virt(imo_virt)%matrix)
          END DO
 
-         DO ispin = 1,nspins
-            DO imo_occ = nmo_occ(ispin),1,-1
-               CALL cp_fm_to_fm(residual_cols(ispin)%vects(imo_occ)%matrix, residual_vects(ispin, irv)%matrix, &
-                                ncol=1, source_start=1, target_start=imo_occ)
+            DO ispin = 1,nspins
+               DO imo_occ = nmo_occ(ispin),1,-1
+                  CALL cp_fm_to_fm(residual_cols(ispin)%vects(imo_occ)%matrix, residual_vects(ispin, irv)%matrix, &
+                                   ncol=1, source_start=1, target_start=imo_occ)
+               END DO
             END DO
          END DO
-      END DO
 
-      IF (ASSOCIATED(rho_jb_fm)) &
-         CALL cp_fm_release(rho_jb_fm)
+         IF (ASSOCIATED(rho_jb_fm)) &
+            CALL cp_fm_release(rho_jb_fm)
 
-      DO ispin = SIZE(Ab_cols),1,-1
-         DO imo_occ = SIZE(Ab_cols(ispin)%vects),1,-1
-            CALL cp_fm_release(residual_cols(ispin)%vects(imo_occ)%matrix)
-            CALL cp_fm_release(Ab_cols(ispin)%vects(imo_occ)%matrix)
+         DO ispin = SIZE(Ab_cols),1,-1
+            DO imo_occ = SIZE(Ab_cols(ispin)%vects),1,-1
+               CALL cp_fm_release(residual_cols(ispin)%vects(imo_occ)%matrix)
+               CALL cp_fm_release(Ab_cols(ispin)%vects(imo_occ)%matrix)
+            END DO
+            DEALLOCATE(residual_cols(ispin)%vects, Ab_cols(ispin)%vects)
          END DO
-         DEALLOCATE(residual_cols(ispin)%vects, Ab_cols(ispin)%vects)
-      END DO
-      DEALLOCATE(residual_cols, Ab_cols)
+         DEALLOCATE(residual_cols, Ab_cols)
 
-      DO ispin = SIZE(Ab_minus_eb),1,-1
-         CALL cp_fm_release(Ab_minus_eb(ispin)%matrix)
-      END DO
-      DEALLOCATE(Ab_minus_eb)
-      DEALLOCATE(nmo_occ)
+         DO ispin = SIZE(Ab_minus_eb),1,-1
+            CALL cp_fm_release(Ab_minus_eb(ispin)%matrix)
+         END DO
+         DEALLOCATE(Ab_minus_eb)
+         DEALLOCATE(nmo_occ)
+      END IF
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt_compute_residual_vects
+
+! **************************************************************************************************
+!> \brief Print final TDDFPT excitation energies and analysis.
+!> \param log_unit output unit
+!> \param evects   TDDFPT trial vectors (SIZE(evects,1) -- number of spins;
+!>                 SIZE(evects,2) -- number of excited states to print)
+!> \param evals    TDDFPT eigenvalues
+!> \param mult     multiplicity
+!> \param gs_mos   molecular orbitals optimized for the ground state
+!> \param matrix_s overlap matrix and their firts derivatives over x, y, and z directions
+!> \param min_amplitude the smallest excitation amplitude to print
+!> \par History
+!>    * 05.2016 created [Sergey Chulkov]
+!>    * 06.2016 transition dipole moments and oscillator strengths [Sergey Chulkov]
+!>    * 07.2016 spin-unpolarised electron density [Sergey Chulkov]
+!> \note \parblock
+!>       Adapted version of the subroutine find_contributions() which was originally created
+!>       by Thomas Chassaing on 02.2005.
+!>
+!>       To compute transition dipole integrals we use the fact that the ground state wave-function
+!>       and all response functions (which are in fact a linear combination of virtual molecular
+!>       orbitals) are eigenfunctions of the Hamiltonian operator. Using the identity:
+!>       \f[\vec{r}\hat{H} - \hat{H}\vec{r} = [\vec{r},\hat{H}] = [\vec{r},-1/2 \nabla^2] = \nabla\f]
+!>       we can derive a relationship between transition dipole integrals and momentum integrals:
+!>       \f[<\psi_i|\nabla|\psi_a> = <\psi_i|\vec{r}|\hat{H}\psi_a> - <\hat{H}\psi_i|\vec{r}|\psi_a>=
+!>       (\epsilon_a - \epsilon_i) <\psi_i|\vec{r}|\psi_a> .\f]
+!>       \endparblock
+! **************************************************************************************************
+   SUBROUTINE tddfpt_print_summary(log_unit, evects, evals, mult, gs_mos, matrix_s, min_amplitude)
+      INTEGER, INTENT(in)                                :: log_unit
+      TYPE(cp_fm_p_type), DIMENSION(:,:), INTENT(in)     :: evects
+      REAL(kind=dp), DIMENSION(:), INTENT(in)            :: evals
+      INTEGER, INTENT(in)                                :: mult
+      TYPE(tddfpt_ground_state_mos), DIMENSION(:), INTENT(in) :: gs_mos
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: matrix_s
+      REAL(kind=dp), INTENT(in)                          :: min_amplitude
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'tddfpt_print_summary', &
+         routineP = moduleN//':'//routineN
+      INTEGER, PARAMETER                                 :: nderivs = 3
+
+      CHARACTER(len=1)  :: lsd_str, spin_occ, spin_virt
+      CHARACTER(len=20) :: mult_str
+
+      INTEGER :: nspins, ispin, state_spin, imo_occ, imo_virt, istate, nstates, &
+                 nmo_virt_occ, nmo_virt_occ_spin, nmo_virt_occ_alpha, ind, nao, ideriv, iexc
+      INTEGER, ALLOCATABLE, DIMENSION(:) :: nmo_occ, nmo_virt, inds
+      REAL(kind=dp)                      :: oscillator_strength
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:) :: weights_abs_1d
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:,:) :: trans_dipole
+      TYPE(tddfpt_allocatable_matrix), ALLOCATABLE, DIMENSION(:) :: weights_2d
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: S_mos_virt, ediff_inv, ediff_inv_weights, scaled_evect, weights_fm
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:,:)    :: dS_mos_occ
+
+      EXTERNAL :: dcopy
+
+      nspins = SIZE(evects, 1)
+      nstates = SIZE(evects, 2)
+      CALL cp_fm_get_info(evects(1,1)%matrix, nrow_global=nao, context=blacs_env, para_env=para_env)
+
+      IF (nspins > 1) THEN
+         lsd_str = 'U'
+      ELSE
+         lsd_str = 'R'
+      END IF
+
+      ALLOCATE(nmo_occ(nspins))
+      ALLOCATE(nmo_virt(nspins))
+      DO ispin = 1,nspins
+         nmo_occ(ispin)  = SIZE(gs_mos(ispin)%evals_occ)
+         nmo_virt(ispin) = SIZE(gs_mos(ispin)%evals_virt)
+      END DO
+
+      ALLOCATE (S_mos_virt(nspins))
+      DO ispin = 1, nspins
+         NULLIFY(fm_struct, S_mos_virt(ispin)%matrix)
+         CALL cp_fm_get_info(gs_mos(ispin)%matrix_mos_virt, matrix_struct=fm_struct)
+         CALL cp_fm_create(S_mos_virt(ispin)%matrix, fm_struct)
+      END DO
+
+      ALLOCATE (weights_2d(nspins))
+      DO ispin = 1,nspins
+         ALLOCATE (weights_2d(ispin)%matrix(nmo_virt(ispin), nmo_occ(ispin)))
+      END DO
+
+      NULLIFY(fm_struct)
+      ALLOCATE (weights_fm(nspins))
+      DO ispin = 1,nspins
+         CALL cp_fm_struct_create(fm_struct, nrow_global=nmo_virt(ispin), ncol_global=nmo_occ(ispin), &
+                                  para_env=para_env, context=blacs_env)
+         NULLIFY(weights_fm(ispin)%matrix)
+         CALL cp_fm_create(weights_fm(ispin)%matrix, fm_struct)
+         CALL cp_fm_struct_release(fm_struct)
+      END DO
+
+      ALLOCATE (dS_mos_occ(nderivs, nspins), ediff_inv(nspins), ediff_inv_weights(nspins), scaled_evect(nspins))
+      DO ispin = 1,nspins
+         NULLIFY(fm_struct, ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix, scaled_evect(ispin)%matrix)
+         CALL cp_fm_get_info(gs_mos(ispin)%matrix_mos_occ, matrix_struct=fm_struct)
+
+         DO ideriv = 1, nderivs
+            NULLIFY(dS_mos_occ(ideriv, ispin)%matrix)
+            CALL cp_fm_create(dS_mos_occ(ideriv, ispin)%matrix, fm_struct)
+         END DO
+         CALL cp_fm_create(ediff_inv(ispin)%matrix, fm_struct)
+         CALL cp_fm_create(ediff_inv_weights(ispin)%matrix, fm_struct)
+         CALL cp_fm_create(scaled_evect(ispin)%matrix, fm_struct)
+      END DO
+
+      DO ispin = 1,nspins
+         CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, gs_mos(ispin)%matrix_mos_virt, S_mos_virt(ispin)%matrix,&
+                                      ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
+         DO ideriv = 1, nderivs
+            CALL cp_dbcsr_sm_fm_multiply(matrix_s(ideriv+1)%matrix, gs_mos(ispin)%matrix_mos_occ, &
+                                         dS_mos_occ(ideriv, ispin)%matrix, ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
+         END DO
+      END DO
+
+      DO ispin = 1,nspins
+         DO imo_occ = nmo_occ(ispin), 1, -1
+            DO imo_virt = nmo_virt(ispin), 1, -1
+               weights_2d(ispin)%matrix(imo_virt, imo_occ) = &
+                          1.0_dp/(gs_mos(ispin)%evals_virt(imo_virt)-gs_mos(ispin)%evals_occ(imo_occ))
+            END DO
+         END DO
+         CALL cp_fm_set_submatrix(ediff_inv(ispin)%matrix, weights_2d(ispin)%matrix)
+      END DO
+
+      ! summary information
+      IF (log_unit > 0) THEN
+         CALL integer_to_string(mult, mult_str)
+         WRITE (log_unit, '(/,1X,A1,A,1X,A,/)') lsd_str,"-TDDFT states of multiplicity", TRIM(mult_str)
+
+         WRITE (log_unit, '(3X,A,T14,A,T31,A,T63,A)') "State", "Excitation", "Transition dipole (a.u.)", "Oscillator"
+         WRITE (log_unit, '(3X,A,T14,A,T33,A,T43,A,T53,A,T61,A)') "number", "energy (eV)", "x", "y", "z", "strength (a.u.)"
+         WRITE (log_unit, '(1X,74("-"))')
+      END IF
+
+      ALLOCATE (trans_dipole(nderivs, nspins))
+      DO istate = 1, nstates
+         DO ispin = 1,nspins
+            CALL cp_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, 1.0_dp, S_mos_virt(ispin)%matrix, &
+                         evects(ispin, istate)%matrix, 0.0_dp, weights_fm(ispin)%matrix)
+
+            CALL cp_fm_schur_product(weights_fm(ispin)%matrix, ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix)
+            CALL cp_gemm('N', 'N', nao, nmo_occ(ispin), nmo_virt(ispin), 1.0_dp, gs_mos(ispin)%matrix_mos_virt, &
+                         ediff_inv_weights(ispin)%matrix, 0.0_dp, scaled_evect(ispin)%matrix)
+
+            DO ideriv = 1, nderivs
+               CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, trans_dipole(ideriv, ispin))
+            END DO
+         END DO
+
+         DO ispin = 2,nspins
+            DO ideriv = 1, nderivs
+               trans_dipole(ideriv, 1) = trans_dipole(ideriv, 1) + trans_dipole(ideriv, ispin)
+            END DO
+         END DO
+         oscillator_strength = 2.0_dp/3.0_dp*evals(istate)*DOT_PRODUCT(trans_dipole(:,1), trans_dipole(:,1))
+
+         IF (log_unit > 0) &
+            WRITE (log_unit, '(1X,I8,T14,F11.5,T28,3(1X,F9.4),T63,F10.5)') &
+            istate, evals(istate)*evolt, trans_dipole(1:nderivs,1), oscillator_strength
+      END DO
+
+      DO ispin = nspins,1,-1
+         CALL cp_fm_release(scaled_evect(ispin)%matrix)
+         CALL cp_fm_release(ediff_inv_weights(ispin)%matrix)
+         CALL cp_fm_release(ediff_inv(ispin)%matrix)
+
+         DO ideriv = nderivs,1,-1
+            CALL cp_fm_release(dS_mos_occ(ideriv, ispin)%matrix)
+         END DO
+      END DO
+      DEALLOCATE(trans_dipole, scaled_evect, ediff_inv_weights, ediff_inv, dS_mos_occ)
+
+      ! excitation analysis
+      IF (min_amplitude < 1.0_dp) THEN
+         IF (nspins == 1) THEN
+            state_spin = 1
+            spin_virt = 'a'
+
+            IF (mult == 3) THEN
+               spin_occ = 'b'
+            ELSE
+               spin_occ = 'a'
+            END IF
+         END IF
+
+         nmo_virt_occ_alpha = nmo_virt(1) * nmo_occ(1)
+         nmo_virt_occ = DOT_PRODUCT(nmo_virt(:), nmo_occ(:))
+         ALLOCATE (weights_abs_1d(nmo_virt_occ))
+         ALLOCATE (inds(nmo_virt_occ))
+
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, '(/,1X,A,/)') "Excitation analysis"
+
+            WRITE (log_unit, '(3X,A,T17,A,T34,A,T49,A)') "State", "Occupied", "Virtual", "Excitation"
+            WRITE (log_unit, '(3X,A,T18,A,T34,A,T49,A)') "number", "orbital", "orbital", "amplitude"
+            WRITE (log_unit, '(1X,57("-"))')
+         END IF
+
+         DO istate = 1, nstates
+            nmo_virt_occ = 0
+            DO ispin = 1,nspins
+               CALL cp_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, 1.0_dp, S_mos_virt(ispin)%matrix, &
+                            evects(ispin, istate)%matrix, 0.0_dp, weights_fm(ispin)%matrix)
+               CALL cp_fm_get_submatrix(weights_fm(ispin)%matrix, weights_2d(ispin)%matrix)
+
+               nmo_virt_occ_spin = nmo_virt(ispin)*nmo_occ(ispin)
+               CALL dcopy(nmo_virt_occ_spin, weights_2d(ispin)%matrix, 1, &
+                          weights_abs_1d(nmo_virt_occ+1:nmo_virt_occ+nmo_virt_occ_spin), 1)
+               nmo_virt_occ = nmo_virt_occ + nmo_virt_occ_spin
+            END DO
+
+            weights_abs_1d = ABS(weights_abs_1d)
+            CALL sort(weights_abs_1d, nmo_virt_occ, inds)
+
+            IF (log_unit > 0) &
+               WRITE (log_unit, '(1X,I8)') istate
+
+            DO iexc = nmo_virt_occ, 1, -1
+               IF (weights_abs_1d(iexc) < min_amplitude) EXIT
+
+               ind = inds(iexc) - 1
+
+               IF (nspins > 1) THEN
+                  IF (ind < nmo_virt_occ_alpha) THEN
+                     state_spin = 1
+                     spin_occ  = 'a'
+                  ELSE
+                     state_spin = 2
+                     ind = ind - nmo_virt_occ_alpha
+                     spin_occ  = 'b'
+                  END IF
+                  spin_virt = spin_occ
+               END IF
+
+               imo_occ = ind/nmo_virt(state_spin)+1
+               imo_virt = MOD(ind, nmo_virt(state_spin))+1
+
+               IF (log_unit > 0) &
+                  WRITE (log_unit, '(T14,I8,1X,A1,A1,A1,T30,I8,1X,A1,A1,A1,T50,F9.6)') imo_occ, '(',spin_occ,')', &
+                  nmo_occ(state_spin)+imo_virt, '(',spin_virt,')', weights_2d(state_spin)%matrix(imo_virt, imo_occ)
+            END DO
+         END DO
+
+         DEALLOCATE (inds)
+         DEALLOCATE (weights_abs_1d)
+      END IF
+
+      DO ispin = nspins,1,-1
+         CALL cp_fm_release(weights_fm(ispin)%matrix)
+         DEALLOCATE(weights_2d(ispin)%matrix)
+      END DO
+      DEALLOCATE(weights_fm, weights_2d)
+
+      DO ispin = nspins,1,-1
+         CALL cp_fm_release(S_mos_virt(ispin)%matrix)
+      END DO
+      DEALLOCATE (S_mos_virt)
+
+      DEALLOCATE(nmo_virt, nmo_occ)
+   END SUBROUTINE tddfpt_print_summary
 END MODULE qs_tddfpt5_methods

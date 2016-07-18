@@ -4121,7 +4121,7 @@ CONTAINS
                           description="Number of additional excited states in the active space "// &
                           "(-1 means all virtual orbitals).", &
                           n_var=1, type_of_var=integer_t, &
-                          default_i_val=10)
+                          default_i_val=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -4154,7 +4154,7 @@ CONTAINS
       CALL keyword_create(keyword, name="CONVERGENCE", &
                           description="Target accuracy for excited state energies.", &
                           n_var=1, type_of_var=real_t, unit_str="hartree", &
-                          default_r_val=1.0e-6_dp)
+                          default_r_val=1.0e-4_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -4190,9 +4190,9 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="HFX_RESIDUAL", &
-                          description="Take into account exact exchange contributions while expanding Krylov space. "//&
-                                      "This could potentially reduce the number of Davidson iterations at the expense of "//&
-                                      "every single Davidson iteration. Make sense for hybrid xc-functionals only.", &
+                          description="Take into account exact exchange terms while expanding Krylov space. "//&
+                                      "This could potentially reduce the number of Davidson iterations at "//&
+                                      "some additional computational costs. Make sense for hybrid functionals only.", &
                           n_var=1, type_of_var=logical_t, &
                           default_l_val=.FALSE.)
       CALL section_add_keyword(section, keyword)
