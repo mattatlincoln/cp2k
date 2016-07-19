@@ -38,7 +38,7 @@ MODULE qs_nl_hash_table_types
 
 ! public methods
    PUBLIC :: nl_hash_table_create, & !create new table
-             nl_hash_table_release, & !destroy exisiting table
+             nl_hash_table_release, & !destroy existing table
              nl_hash_table_has_data, & !check whether table has any data associated with it
              nl_hash_table_nullify, &
              nl_hash_table_add, & !add a new entry to the table
@@ -372,7 +372,8 @@ CONTAINS
    END SUBROUTINE nl_hash_table_rehash
 
 ! **************************************************************************************************
-!> \brief releases given object
+!> \brief releases the hash table.  Note that deallocating tasks stored in the table
+!>        is the responsibility of the caller
 !> \param hash_table : the nl_hash_table object in question
 ! **************************************************************************************************
    SUBROUTINE nl_hash_table_release(hash_table)
@@ -381,7 +382,6 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'nl_hash_table_release', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: k
       LOGICAL                                            :: check_ok
 
       IF (ASSOCIATED(hash_table%obj)) THEN
@@ -390,13 +390,6 @@ CONTAINS
          hash_table%obj%ref_count = hash_table%obj%ref_count-1
          IF (hash_table%obj%ref_count == 0) THEN
             hash_table%obj%ref_count = 1
-
-            DO k = 1, hash_table%obj%nmax
-               IF (ASSOCIATED(hash_table%obj%table(k)%val)) THEN
-                  DEALLOCATE (hash_table%obj%table(k)%val)
-               END IF
-            END DO
-
             IF (ASSOCIATED(hash_table%obj%table)) THEN
                DEALLOCATE (hash_table%obj%table)
             END IF
@@ -407,42 +400,6 @@ CONTAINS
          NULLIFY (hash_table%obj)
       END IF
    END SUBROUTINE nl_hash_table_release
-
-! **************************************************************************************************
-!> \brief Remove element from a table, automatic resize if necessary
-!> \param hash_table : the nl_hash_table object
-!> \param key        : key of the element to be removed
-! **************************************************************************************************
-   SUBROUTINE nl_hash_table_remove(hash_table, key)
-      TYPE(nl_hash_table_obj), INTENT(INOUT)             :: hash_table
-      INTEGER(KIND=int_8), INTENT(IN)                    :: key
-
-      CHARACTER(len=*), PARAMETER :: routineN = 'nl_hash_table_remove', &
-         routineP = moduleN//':'//routineN
-
-      INTEGER                                            :: islot
-      LOGICAL                                            :: check_ok
-
-      check_ok = nl_hash_table_has_data(hash_table)
-      CPASSERT(check_ok)
-      islot = nl_hash_table_linear_probe(hash_table, key)
-
-      ! we are only removing an entry if the key is found
-      IF (islot > 0) THEN
-         IF (hash_table%obj%table(islot)%key == key) THEN
-            hash_table%obj%table(islot)%key = EMPTY_KEY
-            hash_table%obj%nelements = hash_table%obj%nelements-1
-            ! must rehash after setting a filled slot to empty, otherwise the
-            ! table will not work. Automatic resize if required
-            IF (hash_table%obj%nelements*REDUCE_RATIO .LT. hash_table%obj%nmax) THEN
-               CALL nl_hash_table_rehash(hash_table=hash_table, &
-                                         nmax=hash_table%obj%nmax/SHRINK_FACTOR)
-            ELSE
-               CALL nl_hash_table_rehash(hash_table=hash_table)
-            END IF
-         END IF
-      END IF
-   END SUBROUTINE nl_hash_table_remove
 
 ! **************************************************************************************************
 !> \brief retains given object
