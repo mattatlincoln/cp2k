@@ -32,8 +32,8 @@
   LIBXSMM_ACC_MAX_K)
 
 #if defined(LIBXSMM_ACC_MKLTRANS) && defined(__MKL)
-LIBXSMM_ACC_EXTERN_C void MKL_Simatcopy(const char, const char, size_t, size_t, float, float*, size_t, size_t);
-LIBXSMM_ACC_EXTERN_C void MKL_Dimatcopy(const char, const char, size_t, size_t, double, double*, size_t, size_t);
+LIBXSMM_ACC_EXTERN void MKL_Simatcopy(const char, const char, size_t, size_t, float, float*, size_t, size_t);
+LIBXSMM_ACC_EXTERN void MKL_Dimatcopy(const char, const char, size_t, size_t, double, double*, size_t, size_t);
 #endif
 
 
@@ -129,7 +129,7 @@ const libxstream_function libxsmm_acc_transpose_function = reinterpret_cast<libx
 #endif
 
 
-LIBXSMM_ACC_EXTERN_C int libsmm_acc_transpose(void* trs_stack, int offset, int nblks, void* buffer, int datatype, int m, int n, void* stream)
+LIBXSMM_ACC_EXTERN int libsmm_acc_transpose(void* trs_stack, int offset, int nblks, void* buffer, int datatype, int m, int n, void* stream)
 {
   int result = LIBXSMM_ACC_ERROR_NONE;
 

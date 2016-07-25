@@ -40,7 +40,11 @@
 # define LIBXSMM_ACC_LOOP_MAX_N LIBXSMM_MAX_N
 # define LIBXSMM_ACC_LOOP_AVG_N LIBXSMM_AVG_N
 # define LIBXSMM_ACC_RESTRICT LIBXSMM_RESTRICT
-# define LIBXSMM_ACC_EXTERN_C LIBXSMM_EXTERN_C
+# if defined(LIBXSMM_EXTERN)
+#   define LIBXSMM_ACC_EXTERN LIBXSMM_EXTERN
+# else /*legacy*/
+#   define LIBXSMM_ACC_EXTERN LIBXSMM_EXTERN_C
+# endif
 # define LIBXSMM_ACC_FSYMBOL LIBXSMM_FSYMBOL
 # define LIBXSMM_ACC_UNUSED LIBXSMM_UNUSED
 # define LIBXSMM_ACC_MOD2 LIBXSMM_MOD2
@@ -51,7 +55,7 @@
 #   define LIBXSMM_ACC_OFFLOAD_BUILD LIBXSMM_OFFLOAD_BUILD
 # endif
 /** Prefetch strategy used when processing an MM stack. */
-LIBXSMM_ACC_EXTERN_C int libxsmm_acc_prefetch;
+LIBXSMM_ACC_EXTERN int libxsmm_acc_prefetch;
 #else // defined(__LIBXSTREAM)
 # define LIBXSMM_ACC_ASSERT LIBXSTREAM_ASSERT
 # define LIBXSMM_ACC_NOT_SUPPORTED LIBXSTREAM_NOT_SUPPORTED
@@ -71,7 +75,7 @@ LIBXSMM_ACC_EXTERN_C int libxsmm_acc_prefetch;
 # define LIBXSMM_ACC_LOOP_MAX_N LIBXSMM_ACC_MAX_N
 # define LIBXSMM_ACC_LOOP_AVG_N 23
 # define LIBXSMM_ACC_RESTRICT LIBXSTREAM_RESTRICT
-# define LIBXSMM_ACC_EXTERN_C LIBXSTREAM_EXTERN_C
+# define LIBXSMM_ACC_EXTERN LIBXSTREAM_EXTERN_C
 # define LIBXSMM_ACC_FSYMBOL LIBXSTREAM_FSYMBOL
 # define LIBXSMM_ACC_UNUSED LIBXSTREAM_UNUSED
 # define LIBXSMM_ACC_MOD2 LIBXSTREAM_MOD2
@@ -191,7 +195,7 @@ template<> struct libxsmm_acc_elem<float,true>    { static const libxsmm_acc_ele
 template<> struct libxsmm_acc_elem<double,true>   { static const libxsmm_acc_elem_type type = LIBXSMM_ACC_ELEM_C64;
                                                     static const char* name() { return "c64"; } };
 
-LIBXSMM_ACC_EXTERN_C void xsmm_acc_abort(const char* filename, int line_number, const char* message);
+LIBXSMM_ACC_EXTERN void xsmm_acc_abort(const char* filename, int line_number, const char* message);
 
 #endif // defined(__LIBXSMM) || (defined(__ACC) && defined(__ACC_MIC) && defined(__DBCSR_ACC) && defined(__LIBXSTREAM))
 #endif // LIBXSMM_ACC_HPP
