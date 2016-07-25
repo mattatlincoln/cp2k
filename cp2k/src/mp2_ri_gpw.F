@@ -25,16 +25,18 @@ MODULE mp2_ri_gpw
                                               cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_interface,              ONLY: &
-        cp_dbcsr_allocate_matrix_set, cp_dbcsr_col_block_sizes, cp_dbcsr_create, &
+        cp_dbcsr_allocate_matrix_set, cp_dbcsr_col_block_sizes, cp_dbcsr_copy, cp_dbcsr_create, &
         cp_dbcsr_deallocate_matrix, cp_dbcsr_desymmetrize, cp_dbcsr_distribution, &
         cp_dbcsr_finalize, cp_dbcsr_get_data_size, cp_dbcsr_get_data_type, cp_dbcsr_get_info, &
         cp_dbcsr_init, cp_dbcsr_multiply, cp_dbcsr_p_type, cp_dbcsr_put_block, cp_dbcsr_release, &
-        cp_dbcsr_reserve_blocks, cp_dbcsr_row_block_sizes, cp_dbcsr_set, cp_dbcsr_type, &
-        dbcsr_distribution_obj, dbcsr_type_no_symmetry
+        cp_dbcsr_release_p, cp_dbcsr_reserve_blocks, cp_dbcsr_row_block_sizes, cp_dbcsr_set, &
+        cp_dbcsr_type, dbcsr_distribution_obj, dbcsr_type_no_symmetry
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
                                               cp_dbcsr_m_by_n_from_template
-   USE cp_eri_mme_interface,            ONLY: eri_mme_2c_integrate,&
-                                              eri_mme_set_params
+   USE cp_eri_mme_interface,            ONLY: cp_eri_mme_2c_integrate,&
+                                              cp_eri_mme_3c_integrate
+   USE cp_eri_mme_types,                ONLY: cp_eri_mme_param,&
+                                              cp_eri_mme_set_params
    USE cp_fm_basic_linalg,              ONLY: cp_fm_triangular_invert
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose
    USE cp_fm_diag,                      ONLY: cp_fm_syevx
@@ -52,7 +54,6 @@ MODULE mp2_ri_gpw
    USE cp_para_env,                     ONLY: cp_para_env_create,&
                                               cp_para_env_release
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE eri_mme_types,                   ONLY: eri_mme_param
    USE gaussian_gridlevels,             ONLY: gaussian_gridlevel
    USE input_constants,                 ONLY: do_eri_gpw,&
                                               do_eri_mme,&
@@ -263,13 +264,13 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'mp2_ri_gpw_compute_in', &
          routineP = moduleN//':'//routineN
 
-      INTEGER :: add_cut_RI, color_sub_3c, cut_memory, cut_RI, eri_method, gw_corr_lev_total, &
-         handle, handle2, handle3, i, i_counter, itmp(2), LLL, max_row_col_local, &
-         max_row_col_local_beta, max_row_col_local_gw, my_B_all_end, my_B_all_size, &
-         my_B_all_start, my_B_size, my_B_size_beta, my_B_virtual_end, my_B_virtual_end_beta, &
-         my_B_virtual_start, my_B_virtual_start_beta, my_group_L_end, my_group_L_size, &
-         my_group_L_start, ncol_local, nfullcols_total, nfullrows_total, ngroup, ngroup_im_time, &
-         nrow_local, num_small_eigen, virtual, virtual_beta
+      INTEGER :: add_cut_RI, color_sub_3c, cut_memory, cut_RI, eri_method, eri_method_3c, &
+         gw_corr_lev_total, handle, handle2, handle3, i, i_counter, itmp(2), LLL, &
+         max_row_col_local, max_row_col_local_beta, max_row_col_local_gw, my_B_all_end, &
+         my_B_all_size, my_B_all_start, my_B_size, my_B_size_beta, my_B_virtual_end, &
+         my_B_virtual_end_beta, my_B_virtual_start, my_B_virtual_start_beta, my_group_L_end, &
+         my_group_L_size, my_group_L_start, ncol_local, nfullcols_total, nfullrows_total, ngroup, &
+         ngroup_im_time, nrow_local, num_small_eigen, virtual, virtual_beta
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: my_group_L_ends_im_time, &
                                                             my_group_L_sizes_im_time, &
                                                             my_group_L_starts_im_time, sub_proc_map
@@ -280,13 +281,14 @@ CONTAINS
                                                             memory_info
       REAL(KIND=dp)                                      :: cond_num, mem_for_iaK, pair_energy, &
                                                             wfn_size
+      TYPE(cp_dbcsr_p_type), DIMENSION(:), POINTER       :: mat_munu_local_L
       TYPE(cp_dbcsr_type) :: matrix_ia_jb, matrix_ia_jb_beta, matrix_ia_jnu, matrix_ia_jnu_beta, &
          matrix_in_jm, matrix_in_jm_beta, matrix_in_jnu, matrix_in_jnu_beta
+      TYPE(cp_eri_mme_param), POINTER                    :: eri_param
       TYPE(cp_fm_type), POINTER                          :: fm_BIb_gw, fm_BIb_gw_beta, fm_BIb_jb, &
                                                             fm_BIb_jb_beta, fm_matrix_L, &
                                                             fm_matrix_L_RI_metric
       TYPE(cp_para_env_type), POINTER                    :: para_env_L
-      TYPE(eri_mme_param), POINTER                       :: eri_param
       TYPE(pw_p_type)                                    :: psi_L
 
       CALL timeset(routineN, handle)
@@ -406,9 +408,9 @@ CONTAINS
       eri_method = qs_env%mp2_env%eri_method
       eri_param => qs_env%mp2_env%eri_mme_param
 
-      ! Preparations for ERI MME method to compute 2c ERIs
+      ! Preparations for MME method to compute ERIs
       IF (qs_env%mp2_env%eri_method .EQ. do_eri_mme) THEN
-         CALL eri_mme_set_params(eri_param, cell, qs_kind_set, basis_type="RI_AUX", para_env=para_env)
+         CALL cp_eri_mme_set_params(eri_param, cell, qs_kind_set, basis_type_1="ORB", basis_type_2="RI_AUX", para_env=para_env)
       ENDIF
 
       CALL calculate_Lmin1(qs_env, eri_method, eri_param, para_env, para_env_sub, para_env_L, mp2_memory, &
@@ -507,84 +509,142 @@ CONTAINS
 
       CALL timeset(routineN//"_loop", handle2)
       i_counter = 0
-      DO LLL = my_group_L_start, my_group_L_end
-         i_counter = i_counter+1
 
-         ! if we do Obara Saika for the three-center overlap integrals, exit
-         IF (do_im_time) EXIT
+      eri_method_3c = do_eri_gpw ! 3c ERIs not yet supported with MME method
+      ! eri_method_3c = eri_method ! debug 3c ERIs
 
-         ! pseudo psi_L
-         CALL calculate_wavefunction(mo_coeff, 1, psi_L, rho_g, atomic_kind_set, &
-                                     qs_kind_set, cell, dft_control, particle_set, pw_env_sub, &
-                                     basis_type="RI_AUX", &
-                                     external_vector=my_Lrows(:, LLL-my_group_L_start+1))
+      IF (.NOT. do_im_time) THEN
+         SELECT CASE (eri_method_3c) ! TODO: use eri_method once 3-center ERIs are ready
+         CASE (do_eri_mme)
+            NULLIFY (mat_munu_local_L)
+            ALLOCATE (mat_munu_local_L(my_group_L_size))
+            DO LLL = 1, my_group_L_size
+               NULLIFY (mat_munu_local_L(LLL)%matrix)
+               ALLOCATE (mat_munu_local_L(LLL)%matrix)
+               CALL cp_dbcsr_init(mat_munu_local_L(LLL)%matrix)
+               CALL cp_dbcsr_copy(mat_munu_local_L(LLL)%matrix, mat_munu%matrix)
+               CALL cp_dbcsr_set(mat_munu_local_L(LLL)%matrix, 0.0_dp)
+            ENDDO
+            CALL cp_eri_mme_3c_integrate(eri_param, para_env_sub, qs_env, &
+                                         first_c=my_group_L_start, last_c=my_group_L_end, &
+                                         mat_ab=mat_munu_local_L, &
+                                         basis_type_a="ORB", basis_type_b="ORB", &
+                                         basis_type_c="RI_AUX", &
+                                         sab_nl=sab_orb_sub)
+            DO LLL = 1, my_group_L_size
+               CALL ao_to_mo_and_store_B(para_env_sub, mat_munu_local_L(LLL), matrix_ia_jnu, matrix_ia_jb, &
+                                         fm_BIb_jb, BIb_C(LLL, 1:my_B_size, 1:homo), &
+                                         mo_coeff_o, mo_coeff_v, eps_filter, max_row_col_local, sub_proc_map, &
+                                         local_col_row_info, my_B_virtual_end, my_B_virtual_start, "alpha")
 
-         CALL timeset(routineN//"_pot", handle3)
-         rho_r%pw%cr3d = psi_L%pw%cr3d
+               IF (do_alpha_beta) THEN
+                  CALL ao_to_mo_and_store_B(para_env_sub, mat_munu_local_L(LLL), matrix_ia_jnu_beta, matrix_ia_jb_beta, &
+                                            fm_BIb_jb_beta, BIb_C_beta(LLL, 1:my_B_size_beta, 1:homo_beta), &
+                                            mo_coeff_o_beta, mo_coeff_v_beta, eps_filter, max_row_col_local_beta, sub_proc_map, &
+                                            local_col_row_info_beta, my_B_virtual_end_beta, my_B_virtual_start_beta, "beta")
 
-         ! in case we do Coulomb metric for RI, we need the Coulomb operator, but for RI with the
-         ! overlap metric, we do not need the Coulomb operator
-         IF (ri_metric == ri_coulomb) THEN
-            CALL pw_transfer(rho_r%pw, rho_g%pw)
-            CALL pw_poisson_solve(poisson_env, rho_g%pw, pair_energy, pot_g%pw)
-            CALL pw_transfer(pot_g%pw, rho_r%pw)
-         END IF
+               ENDIF
 
-         CALL pw_scale(rho_r%pw, rho_r%pw%pw_grid%dvol)
-         CALL timestop(handle3)
+               IF (my_do_gw .AND. (ri_metric_gw == ri_metric)) THEN
+                  CALL ao_to_mo_and_store_B(para_env_sub, mat_munu_local_L(LLL), matrix_in_jnu, matrix_in_jm, &
+                                            fm_BIb_gw, BIb_C_gw(LLL, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                            mo_coeff_gw, mo_coeff_all, eps_filter, max_row_col_local_gw, sub_proc_map, &
+                                            local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_alpha")
+                  IF (do_alpha_beta) THEN
+                     CALL ao_to_mo_and_store_B(para_env_sub, mat_munu_local_L(LLL), matrix_in_jnu_beta, matrix_in_jm_beta, &
+                                               fm_BIb_gw_beta, BIb_c_gw_beta(LLL, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                               mo_coeff_gw_beta, mo_coeff_all_beta, eps_filter, max_row_col_local_gw, &
+                                               sub_proc_map, local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_beta")
+                  ENDIF
+               ENDIF
+            ENDDO
 
-         ! and finally (K|mu nu)
-         CALL timeset(routineN//"_int", handle3)
-         CALL cp_dbcsr_set(mat_munu%matrix, 0.0_dp)
-         CALL integrate_v_rspace(rho_r, hmat=mat_munu, qs_env=qs_env, calculate_forces=.FALSE., compute_tau=.FALSE., gapw=.FALSE., &
-                                 pw_env_external=pw_env_sub, task_list_external=task_list_sub)
-         CALL timestop(handle3)
+            DO LLL = 1, my_group_L_size
+               CALL cp_dbcsr_release_p(mat_munu_local_L(LLL)%matrix)
+            ENDDO
+            DEALLOCATE (mat_munu_local_L)
+         CASE (do_eri_gpw)
+            DO LLL = my_group_L_start, my_group_L_end
+               i_counter = i_counter+1
 
-         CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_ia_jnu, matrix_ia_jb, &
-                                   fm_BIb_jb, BIb_C(i_counter, 1:my_B_size, 1:homo), &
-                                   mo_coeff_o, mo_coeff_v, eps_filter, max_row_col_local, sub_proc_map, &
-                                   local_col_row_info, my_B_virtual_end, my_B_virtual_start, "alpha")
+               ! if we do Obara Saika for the three-center overlap integrals, exit
+               IF (do_im_time) EXIT
 
-         IF (do_alpha_beta) THEN
-            CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_ia_jnu_beta, matrix_ia_jb_beta, &
-                                      fm_BIb_jb_beta, BIb_C_beta(i_counter, 1:my_B_size_beta, 1:homo_beta), &
-                                      mo_coeff_o_beta, mo_coeff_v_beta, eps_filter, max_row_col_local_beta, sub_proc_map, &
-                                      local_col_row_info_beta, my_B_virtual_end_beta, my_B_virtual_start_beta, "beta")
+               ! pseudo psi_L
+               CALL calculate_wavefunction(mo_coeff, 1, psi_L, rho_g, atomic_kind_set, &
+                                           qs_kind_set, cell, dft_control, particle_set, pw_env_sub, &
+                                           basis_type="RI_AUX", &
+                                           external_vector=my_Lrows(:, LLL-my_group_L_start+1))
 
-         ENDIF
+               CALL timeset(routineN//"_pot", handle3)
+               rho_r%pw%cr3d = psi_L%pw%cr3d
 
-         IF (my_do_gw .AND. (ri_metric_gw == ri_metric)) THEN
-            CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu, matrix_in_jm, &
-                                      fm_BIb_gw, BIb_C_gw(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
-                                      mo_coeff_gw, mo_coeff_all, eps_filter, max_row_col_local_gw, sub_proc_map, &
-                                      local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_alpha")
+               ! in case we do Coulomb metric for RI, we need the Coulomb operator, but for RI with the
+               ! overlap metric, we do not need the Coulomb operator
+               IF (ri_metric == ri_coulomb) THEN
+                  CALL pw_transfer(rho_r%pw, rho_g%pw)
+                  CALL pw_poisson_solve(poisson_env, rho_g%pw, pair_energy, pot_g%pw)
+                  CALL pw_transfer(pot_g%pw, rho_r%pw)
+               END IF
 
-            IF (do_alpha_beta) THEN
-               CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu_beta, matrix_in_jm_beta, &
-                                         fm_BIb_gw_beta, BIb_c_gw_beta(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
-                                         mo_coeff_gw_beta, mo_coeff_all_beta, eps_filter, max_row_col_local_gw, sub_proc_map, &
-                                         local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_beta")
-            ENDIF
-         ENDIF
+               CALL pw_scale(rho_r%pw, rho_r%pw%pw_grid%dvol)
+               CALL timestop(handle3)
 
-         IF (my_do_gw .AND. (ri_metric_gw == ri_metric)) THEN
-            ! transform (K|mu nu) to (K|nm), n corresponds to corrected GW levels, m is in nmo
-            CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu, matrix_in_jm, &
-                                      fm_BIb_gw, BIb_C_gw(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
-                                      mo_coeff_gw, mo_coeff_all, eps_filter, max_row_col_local_gw, sub_proc_map, &
-                                      local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_alpha")
+               ! and finally (K|mu nu)
+               CALL timeset(routineN//"_int", handle3)
+               CALL cp_dbcsr_set(mat_munu%matrix, 0.0_dp)
+               CALL integrate_v_rspace(rho_r, hmat=mat_munu, qs_env=qs_env, &
+                                       calculate_forces=.FALSE., compute_tau=.FALSE., gapw=.FALSE., &
+                                       pw_env_external=pw_env_sub, task_list_external=task_list_sub)
+               CALL timestop(handle3)
 
-            ! the same for beta
-            IF (do_alpha_beta) THEN
-               CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu_beta, matrix_in_jm_beta, &
-                                         fm_BIb_gw_beta, BIb_C_gw_beta(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
-                                         mo_coeff_gw_beta, mo_coeff_all_beta, eps_filter, max_row_col_local_gw, sub_proc_map, &
-                                         local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_beta")
+               CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_ia_jnu, matrix_ia_jb, &
+                                         fm_BIb_jb, BIb_C(i_counter, 1:my_B_size, 1:homo), &
+                                         mo_coeff_o, mo_coeff_v, eps_filter, max_row_col_local, sub_proc_map, &
+                                         local_col_row_info, my_B_virtual_end, my_B_virtual_start, "alpha")
 
-            END IF
-         END IF
+               IF (do_alpha_beta) THEN
+                  CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_ia_jnu_beta, matrix_ia_jb_beta, &
+                                            fm_BIb_jb_beta, BIb_C_beta(i_counter, 1:my_B_size_beta, 1:homo_beta), &
+                                            mo_coeff_o_beta, mo_coeff_v_beta, eps_filter, max_row_col_local_beta, sub_proc_map, &
+                                            local_col_row_info_beta, my_B_virtual_end_beta, my_B_virtual_start_beta, "beta")
 
-      END DO
+               ENDIF
+
+               IF (my_do_gw .AND. (ri_metric_gw == ri_metric)) THEN
+                  CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu, matrix_in_jm, &
+                                            fm_BIb_gw, BIb_C_gw(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                            mo_coeff_gw, mo_coeff_all, eps_filter, max_row_col_local_gw, sub_proc_map, &
+                                            local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_alpha")
+
+                  IF (do_alpha_beta) THEN
+                     CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu_beta, matrix_in_jm_beta, &
+                                               fm_BIb_gw_beta, BIb_c_gw_beta(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                               mo_coeff_gw_beta, mo_coeff_all_beta, eps_filter, max_row_col_local_gw, &
+                                               sub_proc_map, local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_beta")
+                  ENDIF
+               ENDIF
+
+               IF (my_do_gw .AND. (ri_metric_gw == ri_metric)) THEN
+                  ! transform (K|mu nu) to (K|nm), n corresponds to corrected GW levels, m is in nmo
+                  CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu, matrix_in_jm, &
+                                            fm_BIb_gw, BIb_C_gw(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                            mo_coeff_gw, mo_coeff_all, eps_filter, max_row_col_local_gw, sub_proc_map, &
+                                            local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_alpha")
+
+                  ! the same for beta
+                  IF (do_alpha_beta) THEN
+                     CALL ao_to_mo_and_store_B(para_env_sub, mat_munu, matrix_in_jnu_beta, matrix_in_jm_beta, &
+                                               fm_BIb_gw_beta, BIb_C_gw_beta(i_counter, 1:my_B_all_size, 1:gw_corr_lev_total), &
+                                               mo_coeff_gw_beta, mo_coeff_all_beta, eps_filter, max_row_col_local_gw, &
+                                               sub_proc_map, local_col_row_info_gw, my_B_all_end, my_B_all_start, "gw_beta")
+
+                  END IF
+               END IF
+
+            END DO
+         END SELECT
+      ENDIF
 
       ! use possibly different RI metric for GW matrix elements B^nn_P
       IF (my_do_gw .AND. ri_metric_gw /= ri_metric) THEN
@@ -980,7 +1040,7 @@ CONTAINS
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       INTEGER                                            :: eri_method
-      TYPE(eri_mme_param), POINTER                       :: eri_param
+      TYPE(cp_eri_mme_param), POINTER                    :: eri_param
       TYPE(cp_para_env_type), POINTER                    :: para_env, para_env_sub, para_env_L
       REAL(KIND=dp)                                      :: mp2_memory
       TYPE(cp_fm_type), POINTER                          :: fm_matrix_L
@@ -1093,6 +1153,7 @@ CONTAINS
 
       END IF
 
+      ! CALL set_identity(fm_matrix_L) ! debug 3c ERIs
    END SUBROUTINE calculate_Lmin1
 
 ! **************************************************************************************************
@@ -1267,7 +1328,7 @@ CONTAINS
                                          external_matrix_struc, fm_matrix_L_extern, ri_metric)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       INTEGER                                            :: eri_method
-      TYPE(eri_mme_param), POINTER                       :: eri_param
+      TYPE(cp_eri_mme_param), POINTER                    :: eri_param
       TYPE(cp_para_env_type), POINTER                    :: para_env, para_env_sub, para_env_L
       REAL(KIND=dp)                                      :: mp2_memory
       TYPE(cp_fm_type), POINTER                          :: fm_matrix_L
@@ -2130,9 +2191,9 @@ CONTAINS
          L_local_col = 0.0_dp
 
          IF (eri_method .EQ. do_eri_mme .AND. my_ri_metric .EQ. ri_coulomb) THEN
-            CALL eri_mme_2c_integrate(eri_param, para_env_sub, qs_env, &
-                                      basis_type_a="RI_AUX", basis_type_b="RI_AUX", &
-                                      hab=L_local_col, first_b=my_group_L_start, last_b=my_group_L_end)
+            CALL cp_eri_mme_2c_integrate(eri_param, para_env_sub, qs_env, &
+                                         basis_type_a="RI_AUX", basis_type_b="RI_AUX", &
+                                         hab=L_local_col, first_b=my_group_L_start, last_b=my_group_L_end)
 
          ELSEIF (eri_method .EQ. do_eri_gpw .OR. my_ri_metric .NE. ri_coulomb) THEN
 

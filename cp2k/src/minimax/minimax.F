@@ -38,7 +38,7 @@ MODULE minimax
                                               k_mm,&
                                               k_p,&
                                               n_approx
-#include "./base/base_uses.f90"
+#include "../base/base_uses.f90"
 
    IMPLICIT NONE
 
@@ -167,7 +167,7 @@ CONTAINS
 
       CALL get_best_minimax_approx_k53(k, Rc, i_mm)
       CALL get_minimax_coeff_low(i_mm, aw)
-      mm_error = get_minimax_numerical_error(Rc, aw)
+      IF (PRESENT(mm_error)) mm_error = get_minimax_numerical_error(Rc, aw)
 
    END SUBROUTINE get_minimax_coeff_k53
 
