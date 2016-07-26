@@ -165,7 +165,6 @@ CONTAINS
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(block_p_type), ALLOCATABLE, DIMENSION(:)      :: sint
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(dbcsr_distribution_obj), POINTER              :: dbcsr_dist
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gto_basis_set_p_type), DIMENSION(:), POINTER  :: basis_set_list_a, basis_set_list_b
       TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
@@ -198,7 +197,6 @@ CONTAINS
                       atomic_kind_set=atomic_kind_set, &
                       natom=natom, &
                       qs_kind_set=qs_kind_set, &
-                      dbcsr_dist=dbcsr_dist, &
                       dft_control=dft_control)
 
       nimg = dft_control%nimages
@@ -547,7 +545,6 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: rpgfa, rpgfb, scon_a, scon_b, zeta, zetb
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(block_p_type), ALLOCATABLE, DIMENSION(:)      :: sint
-      TYPE(dbcsr_distribution_obj), POINTER              :: dbcsr_dist
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gto_basis_set_type), POINTER                  :: basis_set_a, basis_set_b
       TYPE(neighbor_list_iterator_p_type), &
@@ -563,7 +560,6 @@ CONTAINS
                       atomic_kind_set=atomic_kind_set, &
                       natom=natom, &
                       qs_kind_set=qs_kind_set, &
-                      dbcsr_dist=dbcsr_dist, &
                       dft_control=dft_control)
 
       ! check for symmetry
