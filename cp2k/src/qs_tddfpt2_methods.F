@@ -63,7 +63,8 @@ MODULE qs_tddfpt2_methods
                                               section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type,&
-                                              section_vals_val_get
+                                              section_vals_val_get,&
+                                              section_vals_val_set
    USE kinds,                           ONLY: default_path_length,&
                                               dp,&
                                               int_8
@@ -228,7 +229,7 @@ CONTAINS
       TYPE(qs_rho_type), POINTER                         :: rho_ij_struct
       TYPE(section_vals_type), POINTER                   :: hfx_section, input, &
                                                             tddfpt_print_section, tddfpt_section, &
-                                                            xc_section
+                                                            wfn_restart, xc_section
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), ALLOCATABLE, &
          DIMENSION(:)                                    :: gs_mos
@@ -665,6 +666,18 @@ CONTAINS
          CALL tddfpt_release_ground_state_mos(gs_mos=gs_mos(ispin))
       END DO
       DEALLOCATE (gs_mos)
+
+      ! reuse wave functions during subsequent calls (geometry optimisation, molecular dynamics, etc)
+      tddfpt_control%is_restart = .TRUE.
+      CALL section_vals_val_get(tddfpt_section, "WFN_RESTART_FILE_NAME", n_rep_val=ispin)
+      IF (ispin > 0) THEN
+         wfn_restart => section_vals_get_subs_vals(tddfpt_print_section, "RESTART")
+         CALL section_vals_val_set(tddfpt_section, "WFN_RESTART_FILE_NAME", &
+                                   c_val=cp_print_key_generate_filename(logger, &
+                                                                        wfn_restart, &
+                                                                        extension=".tdwfn", &
+                                                                        my_local=.FALSE.))
+      END IF
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt
@@ -2745,7 +2758,7 @@ CONTAINS
                ! of the occupied MOs varies depending on the eigensolver used as well as
                ! how eigenvectors are distributed across computational cores. The phase is important
                ! because TDDFPT wave functions are used to compute a response electron density
-               ! \rho^{-} = 1/2 * [C_{0} * evect^T + evect * C_{0}^{-}], where C_{0} is the expansion
+               ! \rho^{-} = 1/2 * [C_{0} * evect^T + evect * C_{0}^{-,T}], where C_{0} is the expansion
                ! coefficients of the reference ground-state wave function. To make the restart file
                ! transferable, TDDFPT wave functions are stored in assumption that all ground state
                ! MOs have a positive phase.
@@ -2766,7 +2779,7 @@ CONTAINS
    END SUBROUTINE tddfpt_write_restart
 
 ! **************************************************************************************************
-!> \brief Initialise initial guess vectors by reading (un-normalised) Ritz vectors
+!> \brief Initialise guess vectors by reading (un-normalised) Ritz vectors
 !>        from a binary restart file.
 !> \param evects               vectors to initialise (initialised on exit)
 !> \param evals                TDDFPT eigenvalues (initialised on exit)
