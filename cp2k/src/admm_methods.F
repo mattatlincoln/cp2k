@@ -2067,7 +2067,7 @@ CONTAINS
       nao_aux_fit = admm_env%nao_aux_fit
       nmo = admm_env%nmo(ispin)
       CALL cp_fm_to_fm(admm_env%C_hat(ispin)%matrix, admm_env%work_aux_nmo(ispin)%matrix)
-      CALL cp_fm_column_scale(admm_env%work_aux_nmo(ispin)%matrix, mo_set%occupation_numbers(1:mo_set%homo))
+      CALL cp_fm_column_scale(admm_env%work_aux_nmo(ispin)%matrix, mo_set%occupation_numbers(1:mo_set%nmo))
 
       CALL cp_gemm('N', 'N', nao_aux_fit, nmo, nmo, &
                    1.0_dp, admm_env%work_aux_nmo(ispin)%matrix, admm_env%lambda_inv(ispin)%matrix, 0.0_dp, &
@@ -2079,7 +2079,7 @@ CONTAINS
          CALL cp_dbcsr_plus_fm_fm_t(sparse_matrix=density_matrix, &
                                     matrix_v=admm_env%C_hat(ispin)%matrix, &
                                     matrix_g=admm_env%work_aux_nmo2(ispin)%matrix, &
-                                    ncol=mo_set%homo, &
+                                    ncol=mo_set%nmo, &
                                     alpha=alpha)
       ELSE
          alpha = 1.0_dp
@@ -2087,7 +2087,7 @@ CONTAINS
          CALL cp_dbcsr_plus_fm_fm_t(sparse_matrix=density_matrix, &
                                     matrix_v=admm_env%C_hat(ispin)%matrix, &
                                     matrix_g=admm_env%work_aux_nmo2(ispin)%matrix, &
-                                    ncol=mo_set%homo, &
+                                    ncol=mo_set%nmo, &
                                     alpha=alpha)
       ENDIF
 
