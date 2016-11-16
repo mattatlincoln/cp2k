@@ -4506,6 +4506,13 @@ CONTAINS
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
+      CALL cp_print_key_section_create(print_key, "MOS_MOLDEN", &
+                                       description="TBD", &
+                                       print_level=low_print_level, add_last=add_last_numeric, filename="MOS")
+      CALL section_add_subsection(subsection, print_key)
+      CALL section_release(print_key)
+
+
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 

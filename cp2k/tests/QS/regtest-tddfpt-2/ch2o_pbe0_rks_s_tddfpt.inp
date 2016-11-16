@@ -1,7 +1,7 @@
 &GLOBAL
   PROJECT ch2o_pbe0_rks_s_tddfpt
   RUN_TYPE energy
-  PRINT_LEVEL low
+  PRINT_LEVEL medium
 &END GLOBAL
 
 &FORCE_EVAL
@@ -20,7 +20,7 @@
     POTENTIAL_FILE_NAME POTENTIAL
 
     &MGRID
-      CUTOFF 200
+      CUTOFF 400
     &END MGRID
 
     &QS

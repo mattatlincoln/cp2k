@@ -9,7 +9,7 @@
 
   &PROPERTIES
     &TDDFPT
-       NSTATES      2
+       NSTATES     10
        MAX_ITER    10
        CONVERGENCE [eV] 1.0e-3
 
@@ -36,7 +36,12 @@
     &SCF
       MAX_SCF   30
       EPS_SCF   1e-7
-      SCF_GUESS atomic
+      SCF_GUESS RESTART
+      ADDED_MOS 50
+      &PRINT
+        &MOS_MOLDEN
+        &END
+      &END
     &END SCF
 
     &AUXILIARY_DENSITY_MATRIX_METHOD
