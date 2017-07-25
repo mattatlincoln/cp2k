@@ -95,6 +95,8 @@ MODULE qs_moments
    PUBLIC :: build_berry_moment_matrix, build_local_moment_matrix
    PUBLIC :: build_berry_kpoint_matrix
    PUBLIC :: qs_moment_berry_phase, qs_moment_locop
+   PUBLIC :: qs_moment_tddft_berry_phase
+
 
 CONTAINS
 
@@ -1341,7 +1343,61 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE qs_moment_berry_phase
+    END SUBROUTINE qs_moment_berry_phase
+
+    
+! **************************************************************************************************
+!> \brief ...
+!> \param qs_env ...
+!> \param magnetic ...
+!> \param nmoments ...
+!> \param reference ...
+!> \param ref_point ...
+!> \param unit_number ...
+! **************************************************************************************************
+   SUBROUTINE qs_moment_tddft_berry_phase(qs_env, berry_dip_op)
+
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_moment_tddft_berry_phase', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: handle, i
+      REAL(dp), DIMENSION(3)                             :: kvec
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
+      TYPE(dbcsr_p_type), DIMENSION(:), POINTER       :: berry_dip_op
+      TYPE(dbcsr_type), POINTER                          :: cosmat, sinmat
+
+      CPASSERT(ASSOCIATED(qs_env))
+
+      CALL timeset(routineN, handle)
+
+      NULLIFY (matrix_s)
+
+      CALL get_qs_env(qs_env, &
+                      cell=cell, &
+                      matrix_s=matrix_s)
+
+      NULLIFY (cosmat, sinmat)
+      ALLOCATE (cosmat, sinmat)
+      CALL dbcsr_copy(cosmat, matrix_s(1)%matrix, 'COS MOM')
+      CALL dbcsr_copy(sinmat, matrix_s(1)%matrix, 'SIN MOM')
+      CALL dbcsr_set(cosmat, 0.0_dp)
+      CALL dbcsr_set(sinmat, 0.0_dp)
+
+      DO i = 1, 3
+         kvec(:) = twopi*cell%h_inv(i, :)
+         CALL build_berry_moment_matrix(qs_env, cosmat, sinmat, kvec)
+         CALL dbcsr_copy(berry_dip_op(i)%matrix, cosmat)
+         CALL dbcsr_copy(berry_dip_op(2*i)%matrix, sinmat)
+      END DO
+
+      CALL dbcsr_deallocate_matrix(cosmat)
+      CALL dbcsr_deallocate_matrix(sinmat)
+      CALL timestop(handle)
+
+   END SUBROUTINE qs_moment_tddft_berry_phase
 
 ! **************************************************************************************************
 !> \brief ...

@@ -62,7 +62,8 @@ MODULE qs_tddfpt2_methods
                                               cholesky_off,&
                                               cholesky_restore,&
                                               xas_dip_len,&
-                                              xas_dip_vel
+                                              xas_dip_vel,&
+                                              berry_phase_dip
    USE input_section_types,             ONLY: section_get_ival,&
                                               section_get_rval,&
                                               section_vals_get,&
@@ -112,6 +113,7 @@ MODULE qs_tddfpt2_methods
                                               init_mo_set,&
                                               mo_set_p_type,&
                                               mo_set_type
+   USE qs_moments,                      ONLY: qs_moment_tddft_berry_phase
    USE qs_neighbor_list_types,          ONLY: neighbor_list_set_p_type
    USE qs_operators_ao,                 ONLY: rRc_xyz_ao
    USE qs_rho_methods,                  ONLY: qs_rho_rebuild,&
@@ -392,6 +394,18 @@ CONTAINS
       CASE (xas_dip_vel)
          dipole_op_xyz => matrix_s(2:nderivs+1)
 
+      CASE (berry_phase_dip)
+         NULLIFY (rRc_xyz)
+         CALL dbcsr_allocate_matrix_set(rRc_xyz, nderivs*2)
+         DO ispin = 1, nderivs*2
+            CALL dbcsr_init_p(rRc_xyz(ispin)%matrix)
+            CALL dbcsr_copy(rRc_xyz(ispin)%matrix, matrix_s(1)%matrix)
+            CALL dbcsr_set(rRc_xyz(ispin)%matrix, 0.0_dp)
+         END DO
+         CALL qs_moment_tddft_berry_phase(qs_env, rRc_xyz)
+         ! assign computed components to the generic variable
+         dipole_op_xyz => rRc_xyz
+         
       CASE DEFAULT
          CPABORT("Unimplemented form of the dipole operator")
       END SELECT
@@ -549,8 +563,8 @@ CONTAINS
       END DO
       DEALLOCATE (gs_mos)
 
-      IF (tddfpt_control%dipole_form == xas_dip_len) &
-         CALL dbcsr_deallocate_matrix_set(rRc_xyz)
+      IF (tddfpt_control%dipole_form /= xas_dip_vel) &
+           CALL dbcsr_deallocate_matrix_set(rRc_xyz)
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt
@@ -2790,7 +2804,7 @@ CONTAINS
       CHARACTER(len=20)                                  :: mult_str
       CHARACTER(len=5)                                   :: spin_label
       INTEGER :: handle, icol, ideriv, iproc, irow, ispin, istate, nao, ncols_local, nrows_local, &
-         nspins, nstates, send_handler, send_handler2, state_spin
+         nspins, nstates, send_handler, send_handler2, state_spin, ncomps
       INTEGER(kind=int_8)                                :: iexc, imo_occ, imo_virt, ind, nexcs, &
                                                             nexcs_local, nexcs_max_local, &
                                                             nmo_virt_occ, nmo_virt_occ_alpha
@@ -2801,11 +2815,11 @@ CONTAINS
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
       INTEGER, DIMENSION(maxspins)                       :: nmo_occ, nmo_virt
       LOGICAL                                            :: do_exc_analysis
-      REAL(kind=dp)                                      :: eval_occ, osc_strength, trans_dipole
+      REAL(kind=dp)                                      :: eval_occ, osc_strength, trans_dipole, costerm, sinterm
       REAL(kind=dp), ALLOCATABLE, DIMENSION(:)           :: weights_local, weights_neg_abs_recv, &
                                                             weights_recv
       REAL(kind=dp), DIMENSION(:, :), POINTER            :: local_data
-      REAL(kind=dp), DIMENSION(nderivs)                  :: trans_dipoles
+      REAL(kind=dp), DIMENSION(nderivs)                  :: trans_dipoles, gamma00, gamma00i
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: ediff_inv, ediff_inv_weights, &
                                                             S_mos_virt, scaled_evect, weights_fm
@@ -2819,7 +2833,12 @@ CONTAINS
       nstates = SIZE(evects, 2)
       do_exc_analysis = min_amplitude < 1.0_dp
       osc_strength = 0.0_dp
-
+      IF (dipole_form == berry_phase_dip) THEN
+         ncomps = 2*nderivs
+      ELSE
+         ncomps = nderivs
+      END IF
+      
       CALL dbcsr_get_info(matrix_s, nfullrows_total=nao)
       CALL cp_fm_get_info(gs_mos(1)%mos_virt, context=blacs_env, para_env=para_env)
 
@@ -2836,9 +2855,9 @@ CONTAINS
          nmo_virt8(ispin) = SIZE(gs_mos(ispin)%evals_virt, kind=int_8)
       END DO
 
-      ALLOCATE (dS_mos_occ(nderivs, nspins), S_mos_virt(nspins), weights_fm(nspins))
+      ALLOCATE (dS_mos_occ(ncomps, nspins), S_mos_virt(nspins), weights_fm(nspins))
       DO ispin = 1, nspins
-         DO ideriv = 1, nderivs
+         DO ideriv = 1, ncomps
             NULLIFY (dS_mos_occ(ideriv, ispin)%matrix)
             CALL fm_pool_create_fm(fm_pool_ao_mo_occ(ispin)%pool, dS_mos_occ(ideriv, ispin)%matrix)
          END DO
@@ -2853,7 +2872,7 @@ CONTAINS
          CALL cp_fm_struct_release(fm_struct)
       END DO
 
-      IF (dipole_form == xas_dip_vel) THEN
+      IF (dipole_form /= xas_dip_len) THEN
          ALLOCATE (ediff_inv(nspins), ediff_inv_weights(nspins), scaled_evect(nspins))
          DO ispin = 1, nspins
             NULLIFY (ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix, scaled_evect(ispin)%matrix)
@@ -2890,7 +2909,7 @@ CONTAINS
       DO ispin = 1, nspins
          CALL cp_dbcsr_sm_fm_multiply(matrix_s, gs_mos(ispin)%mos_virt, S_mos_virt(ispin)%matrix, &
                                       ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
-         DO ideriv = 1, nderivs
+         DO ideriv = 1, ncomps
             CALL cp_dbcsr_sm_fm_multiply(dipole_op_xyz(ideriv)%matrix, gs_mos(ispin)%mos_occ, &
                                          dS_mos_occ(ideriv, ispin)%matrix, ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
          END DO
@@ -2906,6 +2925,17 @@ CONTAINS
          WRITE (log_unit, '(T10,72("-"))')
       END IF
 
+      IF (dipole_form == berry_phase_dip) THEN
+         gamma00 = 0.0_dp
+         gamma00i = 0.0_dp
+         DO ideriv = 1, nderivs
+            CALL cp_fm_trace(dS_mos_occ(ideriv, 1)%matrix, gs_mos(1)%mos_occ, costerm)
+            CALL cp_fm_trace(dS_mos_occ(ideriv*2, 1)%matrix, gs_mos(1)%mos_occ, sinterm)
+            gamma00(ideriv) = gamma00(ideriv) + costerm
+            gamma00i(ideriv) = gamma00i(ideriv) + sinterm
+         END DO
+      END IF
+      
       DO istate = 1, nstates
          trans_dipoles(:) = 0.0_dp
 
@@ -2916,39 +2946,55 @@ CONTAINS
                             evects(ispin, istate)%matrix, 0.0_dp, weights_fm(ispin)%matrix)
 
                ! compute electric dipole moments
-               IF (dipole_form == xas_dip_vel) THEN
+               IF (dipole_form /= xas_dip_len) THEN
                   CALL cp_fm_schur_product(weights_fm(ispin)%matrix, ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix)
                   CALL cp_gemm('N', 'N', nao, nmo_occ(ispin), nmo_virt(ispin), 1.0_dp, gs_mos(ispin)%mos_virt, &
                                ediff_inv_weights(ispin)%matrix, 0.0_dp, scaled_evect(ispin)%matrix)
                END IF
 
-               DO ideriv = 1, nderivs
-                  SELECT CASE (dipole_form)
+               SELECT CASE (dipole_form)
                   CASE (xas_dip_len)
-                     CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, evects(ispin, istate)%matrix, trans_dipole)
+                     DO ideriv = 1, ncomps
+                        CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, evects(ispin, istate)%matrix, trans_dipole)
+                        trans_dipoles(ideriv) = trans_dipoles(ideriv)+trans_dipole
+                     END DO
 
                   CASE (xas_dip_vel)
-                     CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, trans_dipole)
+                     DO ideriv = 1, ncomps
+                        CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, trans_dipole)
+                        trans_dipoles(ideriv) = trans_dipoles(ideriv)+trans_dipole
+                     END DO
 
+                  CASE (berry_phase_dip)
+                     DO ideriv = 1, nderivs
+                        CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, costerm)
+                        CALL cp_fm_trace(dS_mos_occ(ideriv*2, ispin)%matrix, scaled_evect(ispin)%matrix, sinterm)
+                        trans_dipoles(ideriv) = trans_dipoles(ideriv)+ SQRT(costerm**2 + sinterm**2)
+                     END DO
+                     
                   CASE DEFAULT
                      CPABORT("Unimplemented form of the dipole operator")
                   END SELECT
 
-                  trans_dipoles(ideriv) = trans_dipoles(ideriv)+trans_dipole
-               END DO
             END DO
          END IF
 
          ! *** summary information ***
          IF (log_unit > 0) THEN
-            osc_strength = 2.0_dp/3.0_dp*evals(istate)*accurate_dot_product(trans_dipoles, trans_dipoles)
+            IF (dipole_form /= berry_phase_dip) THEN
+               osc_strength = 2.0_dp/3.0_dp*evals(istate)*accurate_dot_product(trans_dipoles, trans_dipoles)
+            ELSE
+               osc_strength = 8.0_dp/3.0_dp*evals(istate)*accurate_dot_product(trans_dipoles, trans_dipoles)
+            END IF
 
-            WRITE (log_unit, '(1X,A,T9,I8,T21,F11.5,T34,3(1X,F9.4),T69,F10.5)') &
-               "TDDFPT|", istate, evals(istate)*evolt, trans_dipoles(1:nderivs), osc_strength
+            !WRITE (log_unit, '(1X,A,T9,I8,T21,F11.5,T34,3(1X,F9.4),T69,F10.5)') &
+            WRITE (log_unit, '(1X,A,T9,I8,T21,F11.5,T34,3(1X,F9.4),T69,F10.5,3(1X,F9.4),3(1X,F9.4))') &
+                 "TDDFPT|", istate, evals(istate)*evolt, trans_dipoles(1:nderivs), &
+                 osc_strength, gamma00(1:nderivs), gamma00i(1:nderivs)
          END IF
       END DO
 
-      IF (dipole_form == xas_dip_vel) THEN
+      IF (dipole_form /= xas_dip_len) THEN
          DO ispin = nspins, 1, -1
             CALL fm_pool_give_back_fm(fm_pool_ao_mo_occ(ispin)%pool, scaled_evect(ispin)%matrix)
             CALL cp_fm_release(ediff_inv_weights(ispin)%matrix)
@@ -2958,7 +3004,7 @@ CONTAINS
       END IF
 
       DO ispin = nspins, 1, -1
-         DO ideriv = nderivs, 1, -1
+         DO ideriv = ncomps, 1, -1
             CALL fm_pool_give_back_fm(fm_pool_ao_mo_occ(ispin)%pool, dS_mos_occ(ideriv, ispin)%matrix)
          END DO
       END DO

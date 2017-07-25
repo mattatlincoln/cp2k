@@ -29,7 +29,7 @@ MODULE input_cp2k_properties_dft
         current_orb_center_wannier, do_et_becke, do_et_ddapc, do_full_density, do_no_et, &
         do_spin_density, ot_precond_full_all, ot_precond_full_kinetic, ot_precond_full_single, &
         ot_precond_full_single_inverse, ot_precond_none, ot_precond_s_inverse, use_mom_ref_coac, &
-        use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero, xas_dip_len, xas_dip_vel
+        use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero, xas_dip_len, xas_dip_vel, berry_phase_dip
    USE input_cp2k_atprop,               ONLY: create_atprop_section
    USE input_cp2k_dft,                  ONLY: create_becke_constraint_section,&
                                               create_ddapc_restraint_section,&
@@ -1092,10 +1092,11 @@ CONTAINS
       CALL keyword_create(keyword, name="DIPOLE_FORM", &
                           description="Form of dipole transition integrals.", &
                           default_i_val=xas_dip_vel, &
-                          enum_c_vals=s2a("LENGTH", "VELOCITY"), &
+                          enum_c_vals=s2a("LENGTH", "VELOCITY", "BERRY"), &
                           enum_desc=s2a("Length form &lang; i | r | j &rang;", &
-                                        "Velocity form &lang; i | d/dr | j &rang;"), &
-                          enum_i_vals=(/xas_dip_len, xas_dip_vel/))
+                                        "Velocity form &lang; i | d/dr | j &rang;", &
+                                        "Berry form &lang; i | G.r | j &rang;"), &
+                          enum_i_vals=(/xas_dip_len, xas_dip_vel, berry_phase_dip/))
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
