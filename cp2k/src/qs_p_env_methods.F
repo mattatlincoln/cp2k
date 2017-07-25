@@ -254,9 +254,13 @@ CONTAINS
       !----------------------!
       ! GAPW initializations !
       !----------------------!
-      IF (dft_control%qs_control%gapw) THEN
+
+      IF (dft_control%qs_control%gapw .OR. dft_control%qs_control%gapw_xc) THEN
          CALL local_rho_set_create(p_env%local_rho_set)
          CALL allocate_rho_atom_internals(qs_env, p_env%local_rho_set%rho_atom_set)
+      END IF
+
+      IF (dft_control%qs_control%gapw) THEN
          CALL init_rho0(qs_env, dft_control%qs_control%gapw_control, &
                         .TRUE., p_env%local_rho_set)
          CALL hartree_local_create(p_env%hartree_local)
