@@ -24,6 +24,7 @@ MODULE constraint_fxd
    USE distribution_1d_types,           ONLY: distribution_1d_type
    USE force_env_types,                 ONLY: force_env_get,&
                                               force_env_type
+   USE force_print_env_methods,         ONLY: update_print_sum_forces
    USE kinds,                           ONLY: dp
    USE message_passing,                 ONLY: mp_sum
    USE molecule_kind_list_types,        ONLY: molecule_kind_list_type
@@ -126,6 +127,9 @@ CONTAINS
          CALL get_molecule_kind(molecule_kind, nfixd=nfixed_atoms)
          my_atm_fixed = my_atm_fixed+nfixed_atoms
       END DO
+
+      ! keep the forces acting on fixed atoms, so we can print them later if needed
+      CALL update_print_sum_forces(force_env)
 
       IF (my_atm_fixed /= 0) THEN
          IF (.NOT. PRESENT(w)) THEN

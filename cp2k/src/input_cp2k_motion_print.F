@@ -28,6 +28,8 @@ MODULE input_cp2k_motion_print
                                               section_create,&
                                               section_release,&
                                               section_type
+   USE input_val_types,                 ONLY: char_t,&
+                                              integer_t
    USE string_utilities,                ONLY: newline,&
                                               s2a
 #include "./base/base_uses.f90"
@@ -152,6 +154,28 @@ CONTAINS
       CALL add_format_keyword(keyword, print_key, pos=.FALSE., &
                               description="Specifies the format of the output file for the forces.")
       CALL section_add_subsection(section, print_key)
+      CALL section_release(print_key)
+
+      CALL cp_print_key_section_create(print_key, "SUM_FORCES", &
+                                       description="Controls the output of sum of the forces on selected atoms", &
+                                       print_level=high_print_level, common_iter_levels=1, &
+                                       filename="", unit_str="hartree*bohr^-1")
+      CALL add_format_keyword(keyword, print_key, pos=.FALSE., &
+                              description="Specifies the format of the output file for sum of the forces on selected atoms.")
+      CALL section_add_subsection(section, print_key)
+      CALL keyword_create(keyword, name="LIST", &
+                          description="Specifies a list of atoms", &
+                          usage="LIST {integer} {integer} .. {integer}", repeats=.TRUE., &
+                          n_var=-1, type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="MOLNAME", &
+                          description="Specifies a list of named molecular fragments", &
+                          repeats=.TRUE., &
+                          n_var=-1, type_of_var=char_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
       CALL section_release(print_key)
 
       CALL cp_print_key_section_create(print_key, "SHELL_FORCES", &

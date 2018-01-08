@@ -35,6 +35,7 @@ MODULE md_energies
    USE force_env_types,                 ONLY: force_env_get,&
                                               force_env_type,&
                                               use_mixed_force
+   USE force_print_env_types,           ONLY: force_print_env_type
    USE input_constants,                 ONLY: npe_f_ensemble,&
                                               npe_i_ensemble,&
                                               nph_uniaxial_damped_ensemble,&
@@ -273,6 +274,7 @@ CONTAINS
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(cp_subsys_type), POINTER                      :: subsys
       TYPE(force_env_type), POINTER                      :: force_env
+      TYPE(force_print_env_type), POINTER                :: force_print_env
       TYPE(md_ener_type), POINTER                        :: md_ener
       TYPE(particle_list_type), POINTER                  :: core_particles, particles, &
                                                             shell_particles
@@ -296,7 +298,7 @@ CONTAINS
       NULLIFY (motion_section, atomic_kinds, atomic_kind_set, cell, subsys, &
                force_env, md_ener, qmmm_env, reftraj, core_particles, particles, &
                shell_particles, print_key, root_section, simpar, virial, &
-               thermostats, thermal_regions)
+               thermostats, thermal_regions, force_print_env)
 
       CALL get_md_env(md_env=md_env, itimes=itimes, t=time, used_time=used_time, &
                       simpar=simpar, force_env=force_env, init=init, md_ener=md_ener, &
@@ -306,7 +308,7 @@ CONTAINS
       root_section => force_env%root_section
       motion_section => section_vals_get_subs_vals(root_section, "MOTION")
 
-      CALL force_env_get(force_env, cell=cell, subsys=subsys, qmmm_env=qmmm_env)
+      CALL force_env_get(force_env, cell=cell, subsys=subsys, qmmm_env=qmmm_env, print_env=force_print_env)
 
       qmmm = calc_nfree_qm(md_env, md_ener) > 0
       is_mixed = (force_env%in_use == use_mixed_force)
@@ -444,6 +446,12 @@ CONTAINS
          ! Print Force
          CALL write_trajectory(force_env, root_section, itimes, time*femtoseconds, dt*femtoseconds, md_ener%epot, &
                                "FORCES", my_pos, my_act, middle_name="frc", extended_xmol_title=.TRUE.)
+
+         ! Print Forces on selected atoms
+         IF (ALLOCATED(force_print_env%atom_list_fixed)) THEN
+            CALL write_trajectory(force_env, root_section, itimes, time*femtoseconds, dt*femtoseconds, md_ener%epot, &
+                                  "SUM_FORCES", my_pos, my_act, middle_name="sfrc", extended_xmol_title=.TRUE.)
+         END IF
 
          ! Print Force-Mixing labels
          CALL write_trajectory(force_env, root_section, itimes, time*femtoseconds, dt*femtoseconds, md_ener%epot, &

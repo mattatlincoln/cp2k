@@ -65,6 +65,8 @@ MODULE force_env_methods
                                               write_forces,&
                                               write_stress_tensor
    USE force_fields_util,               ONLY: get_generic_info
+   USE force_print_env_methods,         ONLY: read_force_print_env
+   USE force_print_env_types,           ONLY: force_print_env_create
    USE fp_methods,                      ONLY: fp_eval
    USE fparser,                         ONLY: EvalErrType,&
                                               evalf,&
@@ -694,7 +696,7 @@ CONTAINS
                force_env%meta_env, force_env%sub_force_env, &
                force_env%qmmm_env, force_env%qmmmx_env, force_env%fp_env, &
                force_env%force_env_section, force_env%eip_env, force_env%mixed_env, &
-               force_env%root_section)
+               force_env%print_env, force_env%root_section)
       last_force_env_id = last_force_env_id+1
       force_env%id_nr = last_force_env_id
       force_env%ref_count = 1
@@ -767,6 +769,9 @@ CONTAINS
       ELSE
          NULLIFY (force_env%meta_env)
       END IF
+
+      CALL force_print_env_create(force_env%print_env)
+      CALL read_force_print_env(force_env)
 
    END SUBROUTINE force_env_create
 

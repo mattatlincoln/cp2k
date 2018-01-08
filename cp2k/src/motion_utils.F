@@ -25,6 +25,7 @@ MODULE motion_utils
    USE cp_units,                        ONLY: cp_unit_from_cp2k
    USE force_env_types,                 ONLY: force_env_get,&
                                               force_env_type
+   USE force_print_env_types,           ONLY: force_print_env_type
    USE input_constants,                 ONLY: dump_atomic,&
                                               dump_dcd,&
                                               dump_dcd_aligned_cell,&
@@ -291,6 +292,7 @@ CONTAINS
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_subsys_type), POINTER                      :: subsys
+      TYPE(force_print_env_type), POINTER                :: force_print_env
       TYPE(particle_list_type), POINTER                  :: my_particles
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(section_vals_type), POINTER                   :: force_env_section, &
@@ -323,6 +325,9 @@ CONTAINS
       CASE ("FORCE_MIXING_LABELS")
          id_dcd = "FML "
          id_wpc = "FORCE_MIXING_LABELS"
+      CASE ("SUM_FORCES")
+         id_dcd = "SFRC "
+         id_wpc = "FORCE"
       CASE DEFAULT
          CPABORT("")
       END SELECT
@@ -331,7 +336,7 @@ CONTAINS
       charge_beta = .FALSE.
       charge_extended = .FALSE.
 
-      CALL force_env_get(force_env, cell=cell, subsys=subsys)
+      CALL force_env_get(force_env, cell=cell, subsys=subsys, print_env=force_print_env)
       IF (PRESENT(particles)) THEN
          CPASSERT(ASSOCIATED(particles))
          my_particles => particles
@@ -439,6 +444,12 @@ CONTAINS
             CALL write_particle_coordinates(particle_set, traj_unit, outformat, TRIM(id_wpc), TRIM(title), cell, &
                                             array=fml_array)
             DEALLOCATE (fml_array)
+         ELSE IF (TRIM(my_pk_name) == "SUM_FORCES") THEN
+            IF (traj_unit > 0) THEN
+               WRITE (traj_unit, '(A,I0)') "# Step ", it
+               WRITE (traj_unit, '(A,1000(1X,I0))') "# Selected atoms: ", force_print_env%atom_list_fixed(:)
+               WRITE (traj_unit, '(3F20.10)') force_print_env%forces_fixed(:)*unit_conv
+            END IF
          ELSE
             CALL write_particle_coordinates(particle_set, traj_unit, outformat, TRIM(id_wpc), TRIM(title), cell, &
                                             unit_conv=unit_conv, &

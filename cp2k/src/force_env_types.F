@@ -30,6 +30,8 @@ MODULE force_env_types
    USE fist_environment_types,          ONLY: fist_env_get,&
                                               fist_env_release,&
                                               fist_environment_type
+   USE force_print_env_types,           ONLY: force_print_env_release,&
+                                              force_print_env_type
    USE fp_types,                        ONLY: fp_env_release,&
                                               fp_env_retain,&
                                               fp_type
@@ -135,6 +137,7 @@ MODULE force_env_types
       TYPE(qmmm_env_type), POINTER                     :: qmmm_env
       TYPE(qmmmx_env_type), POINTER                    :: qmmmx_env
       TYPE(mixed_environment_type), POINTER            :: mixed_env
+      TYPE(force_print_env_type), POINTER              :: print_env
       TYPE(section_vals_type), POINTER                 :: force_env_section
       TYPE(section_vals_type), POINTER                 :: root_section
       LOGICAL                                          :: do_embedding
@@ -233,6 +236,7 @@ CONTAINS
             CALL fp_env_release(force_env%fp_env)
             CALL qmmm_env_release(force_env%qmmm_env)
             CALL qmmmx_env_release(force_env%qmmmx_env)
+            CALL force_print_env_release(force_env%print_env)
             CALL section_vals_release(force_env%force_env_section)
             CALL section_vals_release(force_env%root_section)
             DEALLOCATE (force_env)
@@ -267,6 +271,7 @@ CONTAINS
 !> \param method_name_id ...
 !> \param root_section ...
 !> \param mixed_env ...
+!> \param print_env ...
 !> \par History
 !>      04.2003 created [fawzi]
 !> \author fawzi
@@ -275,7 +280,7 @@ CONTAINS
                                       meta_env, fp_env, subsys, para_env, potential_energy, additional_potential, &
                                       kinetic_energy, harmonic_shell, kinetic_shell, cell, sub_force_env, &
                                       qmmm_env, qmmmx_env, eip_env, globenv, input, force_env_section, &
-                                      method_name_id, root_section, mixed_env)
+                                      method_name_id, root_section, mixed_env, print_env)
       TYPE(force_env_type), POINTER                      :: force_env
       INTEGER, INTENT(out), OPTIONAL                     :: in_use
       TYPE(fist_environment_type), OPTIONAL, POINTER     :: fist_env
@@ -298,6 +303,7 @@ CONTAINS
       INTEGER, INTENT(out), OPTIONAL                     :: method_name_id
       TYPE(section_vals_type), OPTIONAL, POINTER         :: root_section
       TYPE(mixed_environment_type), OPTIONAL, POINTER    :: mixed_env
+      TYPE(force_print_env_type), OPTIONAL, POINTER      :: print_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'force_env_get', routineP = moduleN//':'//routineN
 
@@ -419,6 +425,7 @@ CONTAINS
       IF (PRESENT(qmmm_env)) qmmm_env => force_env%qmmm_env
       IF (PRESENT(qmmmx_env)) qmmmx_env => force_env%qmmmx_env
       IF (PRESENT(mixed_env)) mixed_env => force_env%mixed_env
+      IF (PRESENT(print_env)) print_env => force_env%print_env
       IF (PRESENT(globenv)) globenv => force_env%globenv
       IF (PRESENT(root_section)) root_section => force_env%root_section
 
