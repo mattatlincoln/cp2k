@@ -27,13 +27,17 @@ CONTAINS
 !> \brief compute direction vector of the given contact
 !> \param origin              origin
 !> \param direction_vector    direction vector
+!> \param origin_bias ...
+!> \param direction_vector_bias ...
 !> \param atomlist_screening  atoms belonging to the contact's screening region
 !> \param atomlist_bulk       atoms belonging to the contact's bulk region
 !> \param subsys              QuickStep subsystem
 !> \author Sergey Chulkov
 ! **************************************************************************************************
-   SUBROUTINE contact_direction_vector(origin, direction_vector, atomlist_screening, atomlist_bulk, subsys)
-      REAL(kind=dp), DIMENSION(3), INTENT(out)           :: origin, direction_vector
+   SUBROUTINE contact_direction_vector(origin, direction_vector, origin_bias, direction_vector_bias, &
+                                       atomlist_screening, atomlist_bulk, subsys)
+      REAL(kind=dp), DIMENSION(3), INTENT(out)           :: origin, direction_vector, origin_bias, &
+                                                            direction_vector_bias
       INTEGER, DIMENSION(:), INTENT(in)                  :: atomlist_screening, atomlist_bulk
       TYPE(qs_subsys_type), POINTER                      :: subsys
 
@@ -42,7 +46,7 @@ CONTAINS
 
       INTEGER                                            :: handle, iatom, natoms_bulk, &
                                                             natoms_screening, nparticles
-      REAL(kind=dp)                                      :: proj, proj_max, proj_min
+      REAL(kind=dp)                                      :: proj, proj_max, proj_min, proj_min_bias
       REAL(kind=dp), DIMENSION(3)                        :: vector
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
 
@@ -77,11 +81,13 @@ CONTAINS
       ! the point 'center_of_coords0' belongs to the first unit cell, so the lowest projection of any point
       ! from the first unit cell on the direction vector 'center_of_coords1 - center_of_coords0' should be <= 0
       proj_min = 0.0_dp
+      proj_min_bias = 0.0_dp
       DO iatom = 1, natoms_screening
          vector = particle_set(atomlist_screening(iatom))%r-origin
          proj = projection_on_direction_vector(vector, direction_vector)
 
          IF (proj < proj_min) proj_min = proj
+         IF (proj > proj_min_bias) proj_min_bias = proj
       END DO
 
       ! the point 'center_of_coords1' belongs to the given contact, so the highest projection should be >= 1
@@ -94,10 +100,12 @@ CONTAINS
       END DO
 
       ! adjust the origin, so it lies on a plane between the given contact and the scaterring region
+      origin_bias = origin+proj_min_bias*direction_vector
       origin = origin+proj_min*direction_vector
 
       ! rescale the vector, so the last atom of the given contact and the point 'origin + direction_vector' lie on
       ! the same plane parallel to the 'origin' plane -- which separates the contact from the scaterring region.
+      direction_vector_bias = (proj_max-proj_min_bias)*direction_vector
       direction_vector = (proj_max-proj_min)*direction_vector
 
       CALL timestop(handle)
