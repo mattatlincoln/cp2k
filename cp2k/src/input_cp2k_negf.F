@@ -103,13 +103,6 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, name="TEMPERATURE", &
-                          description="Electronic temperature.", &
-                          n_var=1, type_of_var=real_t, unit_str="K", &
-                          default_r_val=300.0_dp/kelvin)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, name="ENERGY_LBOUND", &
                           description="Lower bound energy of the conductance band.", &
                           n_var=1, type_of_var=real_t, unit_str="hartree", &
@@ -188,6 +181,25 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, name="V_SHIFT", &
+                          description="Initial value of the Hartree potential shift", &
+                          n_var=1, type_of_var=real_t, unit_str="hartree", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="V_SHIFT_ALPHA", &
+                          description="Mixing factor to determine the optimal shift in Hartree potential", &
+                          n_var=1, type_of_var=real_t, default_r_val=0.20_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="V_SHIFT_MAX_ITERS", &
+                          description="Maximal number of iteration to determine the optimal shift in Hartree potential", &
+                          n_var=1, type_of_var=integer_t, default_i_val=30)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       ! PRINT subsection
       CALL section_create(subsection, "PRINT", "Print properties for the scattering region.", &
                           repeats=.FALSE.)
@@ -224,7 +236,7 @@ CONTAINS
 
       CALL section_create(section, "CONTACT", &
                           description="Section defining the contact region of NEGF setup.", &
-                          n_keywords=4, n_subsections=3, repeats=.TRUE.)
+                          n_keywords=5, n_subsections=3, repeats=.TRUE.)
 
       NULLIFY (keyword, print_key, subsection)
 
@@ -265,6 +277,13 @@ CONTAINS
                           " as a starting point. By default the Fermi level is computed only"// &
                           " when the keyword FERMI_LEVEL is not given explicitly.", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, name="TEMPERATURE", &
+                          description="Electronic temperature.", &
+                          n_var=1, type_of_var=real_t, unit_str="K", &
+                          default_r_val=300.0_dp/kelvin)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

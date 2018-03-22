@@ -79,8 +79,7 @@ MODULE qs_ks_methods
                                               lri_kind_type
    USE mathlib,                         ONLY: abnormal_value
    USE message_passing,                 ONLY: mp_sum
-   USE negf_qs_env_methods,             ONLY: negf_modify_hartree_pot,&
-                                              negf_update_ks_matrix
+   USE negf_qs_env_methods,             ONLY: negf_update_ks_matrix
    USE negf_qs_env_types,               ONLY: negf_qs_env_type
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
@@ -533,11 +532,6 @@ CONTAINS
          END IF
       END IF
       CALL pw_pool_give_back_pw(auxbas_pw_pool, rho_tot_gspace%pw)
-
-      ! external NEGF potential
-      IF (negf_qs_env%apply_bias) THEN
-         CALL negf_modify_hartree_pot(v_hartree_rspace, negf_qs_env)
-      END IF
 
       ! calculate the density matrix for the fitted mo_coeffs
       IF (dft_control%do_admm) THEN

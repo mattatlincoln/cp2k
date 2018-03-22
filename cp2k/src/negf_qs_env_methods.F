@@ -23,7 +23,7 @@ MODULE negf_qs_env_methods
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'negf_qs_env_methods'
    LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
 
-   PUBLIC :: negf_update_ks_matrix, negf_modify_hartree_pot
+   PUBLIC :: negf_update_ks_matrix
 
 CONTAINS
 
@@ -99,6 +99,7 @@ CONTAINS
       CALL timestop(handle)
    END SUBROUTINE negf_update_ks_matrix
 
+#if 0
 ! **************************************************************************************************
 !> \brief Modify the Hartree potential by applying an external potential.
 !> \param v_hartree     Hartree potential to update
@@ -187,4 +188,5 @@ CONTAINS
 
       CALL timestop(handle)
    END SUBROUTINE negf_modify_hartree_pot
+#endif
 END MODULE negf_qs_env_methods

@@ -9,11 +9,12 @@
 ! **************************************************************************************************
 MODULE negf_qs_env_types
    USE kinds,                           ONLY: dp
+   USE message_passing,                 ONLY: mp_sum
    USE negf_alloc_types,                ONLY: negf_allocatable_rmatrix
-   USE pw_env_types,                    ONLY: pw_env_get,&
-                                              pw_env_type
-   USE pw_pool_types,                   ONLY: pw_pool_give_back_pw,&
-                                              pw_pool_type
+   USE pw_env_types,                    ONLY: pw_env_type
+   USE pw_grid_types,                   ONLY: PW_MODE_DISTRIBUTED,&
+                                              pw_grid_type
+   USE pw_pool_types,                   ONLY: pw_pool_type
    USE pw_types,                        ONLY: pw_type
 #include "./base/base_uses.f90"
 
@@ -64,12 +65,15 @@ MODULE negf_qs_env_types
       LOGICAL                                            :: update_ks_matrix
       TYPE(negf_qs_env_contact_type), ALLOCATABLE, &
          DIMENSION(:)                                    :: contacts
-      !> reference Hartree potential (with no bias)
-      TYPE(pw_type), POINTER                             :: v_hartree_ref
+      !> reference Hartree potential (with no bias) !!! no longer needed !!!
+      !TYPE(pw_type), POINTER                             :: v_hartree_ref
+      !> pw_neighbour_blocks_mepos(bound, axis), bound = 1 (lower), 2 (upper); axis = 1 (x), 2 (y), 3 (z)
+      INTEGER, DIMENSION(2, 3)                            :: pw_neighbour_blocks_mepos
+      REAL(kind=dp)                                      :: conv_jacobi
    END TYPE negf_qs_env_type
 
    PUBLIC :: negf_qs_env_type, negf_qs_env_contact_type, negf_matrix_block_map_type
-   PUBLIC :: negf_qs_env_create, negf_qs_env_release
+   PUBLIC :: negf_qs_env_create, negf_qs_env_neighbour_mepos, negf_qs_env_release
 
 CONTAINS
 
@@ -93,27 +97,107 @@ CONTAINS
       ALLOCATE (negf_qs_env)
       negf_qs_env%apply_bias = .FALSE.
       negf_qs_env%update_ks_matrix = .FALSE.
-      NULLIFY (negf_qs_env%v_hartree_ref)
+      !NULLIFY (negf_qs_env%v_hartree_ref)
 
       CALL timestop(handle)
    END SUBROUTINE negf_qs_env_create
 
 ! **************************************************************************************************
+!> \brief ...
+!> \param negf_qs_env ...
+!> \param pw_pool ...
+! **************************************************************************************************
+   SUBROUTINE negf_qs_env_neighbour_mepos(negf_qs_env, pw_pool)
+      TYPE(negf_qs_env_type), POINTER                    :: negf_qs_env
+      TYPE(pw_pool_type), POINTER                        :: pw_pool
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'negf_qs_env_neighbour_mepos', &
+         routineP = moduleN//':'//routineN
+
+      INTEGER                                            :: group_size, handle, igroup
+      INTEGER, ALLOCATABLE, DIMENSION(:, :, :)           :: bounds_local
+      TYPE(pw_grid_type), POINTER                        :: pw_grid
+
+      CALL timeset(routineN, handle)
+      pw_grid => pw_pool%pw_grid
+
+      negf_qs_env%pw_neighbour_blocks_mepos(:, :) = -1
+
+      IF (pw_grid%para%mode == PW_MODE_DISTRIBUTED) THEN
+         group_size = pw_grid%para%group_size
+         ALLOCATE (bounds_local(2, 3, 0:group_size))
+
+         bounds_local(:, :, :) = 0
+         bounds_local(1:2, 1:3, pw_grid%para%my_pos) = pw_grid%bounds_local
+         CALL mp_sum(bounds_local, pw_grid%para%group)
+
+         DO igroup = 0, group_size-1
+            IF (bounds_local(1, 1, igroup) == pw_grid%bounds_local(1, 1) .AND. &
+                bounds_local(2, 1, igroup) == pw_grid%bounds_local(2, 1)) THEN
+
+               IF (bounds_local(1, 2, igroup) == pw_grid%bounds_local(1, 2) .AND. &
+                   bounds_local(2, 2, igroup) == pw_grid%bounds_local(2, 2)) THEN
+
+                  ! same xy plane
+                  IF (bounds_local(2, 3, igroup) == pw_grid%bounds_local(1, 3)-1) &
+                     negf_qs_env%pw_neighbour_blocks_mepos(1, 3) = igroup ! -z
+
+                  IF (bounds_local(1, 3, igroup) == pw_grid%bounds_local(2, 3)+1) &
+                     negf_qs_env%pw_neighbour_blocks_mepos(2, 3) = igroup ! +z
+               END IF
+
+               IF (bounds_local(1, 3, igroup) == pw_grid%bounds_local(1, 3) .AND. &
+                   bounds_local(2, 3, igroup) == pw_grid%bounds_local(2, 3)) THEN
+
+                  ! same xz plane
+                  IF (bounds_local(2, 2, igroup) == pw_grid%bounds_local(1, 2)-1) &
+                     negf_qs_env%pw_neighbour_blocks_mepos(1, 2) = igroup ! -y
+
+                  IF (bounds_local(1, 2, igroup) == pw_grid%bounds_local(2, 2)+1) &
+                     negf_qs_env%pw_neighbour_blocks_mepos(2, 2) = igroup ! +y
+               END IF
+            ELSE IF (bounds_local(2, 1, igroup) == pw_grid%bounds_local(1, 1)-1) THEN
+               ! -x if yz plane is the same
+
+               IF (bounds_local(1, 2, igroup) == pw_grid%bounds_local(1, 2) .AND. &
+                   bounds_local(2, 2, igroup) == pw_grid%bounds_local(2, 2) .AND. &
+                   bounds_local(1, 3, igroup) == pw_grid%bounds_local(1, 3) .AND. &
+                   bounds_local(2, 3, igroup) == pw_grid%bounds_local(2, 3)) &
+                  negf_qs_env%pw_neighbour_blocks_mepos(1, 1) = igroup ! -x
+
+            ELSE IF (bounds_local(1, 1, igroup) == pw_grid%bounds_local(2, 1)+1) THEN
+               ! +x if yz plane is the same
+
+               IF (bounds_local(1, 2, igroup) == pw_grid%bounds_local(1, 2) .AND. &
+                   bounds_local(2, 2, igroup) == pw_grid%bounds_local(2, 2) .AND. &
+                   bounds_local(1, 3, igroup) == pw_grid%bounds_local(1, 3) .AND. &
+                   bounds_local(2, 3, igroup) == pw_grid%bounds_local(2, 3)) &
+                  negf_qs_env%pw_neighbour_blocks_mepos(2, 1) = igroup ! +x
+            END IF
+         END DO
+
+         DEALLOCATE (bounds_local)
+      END IF
+
+      CALL timestop(handle)
+   END SUBROUTINE negf_qs_env_neighbour_mepos
+
+! **************************************************************************************************
 !> \brief Release memory allocated for NEGF control options.
 !> \param negf_qs_env an object to release
-!> \param pw_env      plane-wave environment used to create the reference Hartree potential
 !> \par History
 !>    * 10.2017 created [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE negf_qs_env_release(negf_qs_env, pw_env)
+   SUBROUTINE negf_qs_env_release(negf_qs_env)
       TYPE(negf_qs_env_type), POINTER                    :: negf_qs_env
-      TYPE(pw_env_type), POINTER                         :: pw_env
 
       CHARACTER(len=*), PARAMETER :: routineN = 'negf_qs_env_release', &
          routineP = moduleN//':'//routineN
 
       INTEGER                                            :: handle, iblock, icontact, ispin
-      TYPE(pw_pool_type), POINTER                        :: pw_pool
+
+!      TYPE(pw_env_type), POINTER                         :: pw_env
+!      TYPE(pw_pool_type), POINTER                        :: pw_pool
 
       CALL timeset(routineN, handle)
 
@@ -138,10 +222,10 @@ CONTAINS
             DEALLOCATE (negf_qs_env%contacts)
          END IF
 
-         IF (ASSOCIATED(negf_qs_env%v_hartree_ref)) THEN
-            CALL pw_env_get(pw_env, auxbas_pw_pool=pw_pool)
-            CALL pw_pool_give_back_pw(pw_pool, negf_qs_env%v_hartree_ref)
-         END IF
+         !IF (ASSOCIATED(negf_qs_env%v_hartree_ref)) THEN
+         !   CALL pw_env_get(pw_env, auxbas_pw_pool=pw_pool)
+         !   CALL pw_pool_give_back_pw(pw_pool, negf_qs_env%v_hartree_ref)
+         !END IF
 
          DEALLOCATE (negf_qs_env)
       END IF
