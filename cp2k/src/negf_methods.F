@@ -126,6 +126,7 @@ MODULE negf_methods
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'negf_methods'
    LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
+   LOGICAL, PARAMETER, PRIVATE          :: disable_cache = .TRUE.
 
    PUBLIC :: do_negf
 
@@ -1065,6 +1066,8 @@ CONTAINS
                                               matrix_s_global=matrix_s_fm, &
                                               is_circular=.TRUE., &
                                               g_surf_cache=g_surf_circular(ispin))
+                  IF (disable_cache) &
+                     CALL green_functions_cache_release(g_surf_circular(ispin))
 
                   ! closed contour: L-path
                   CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin)%matrix, &
@@ -1081,6 +1084,8 @@ CONTAINS
                                               matrix_s_global=matrix_s_fm, &
                                               is_circular=.FALSE., &
                                               g_surf_cache=g_surf_linear(ispin))
+                  IF (disable_cache) &
+                     CALL green_functions_cache_release(g_surf_linear(ispin))
 
                   ! non-equilibrium part
                   IF (ABS(negf_control%contacts(icontact)%v_external- &
@@ -1095,6 +1100,8 @@ CONTAINS
                                                 base_contact=base_contact, &
                                                 matrix_s_global=matrix_s_fm, &
                                                 g_surf_cache=g_surf_nonequiv(ispin))
+                     IF (disable_cache) &
+                        CALL green_functions_cache_release(g_surf_nonequiv(ispin))
                   END IF
                END DO
 
