@@ -485,7 +485,7 @@ CONTAINS
             DO ispin = 1, nspins
                CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_fm, &
                                                   v_shift=0.0_dp, &
-                                                  do_corr=.FALSE., ignore_bias=.FALSE., &
+                                                  ignore_bias=.FALSE., &
                                                   negf_env=negf_env, &
                                                   negf_control=negf_control, &
                                                   sub_env=sub_env, &
@@ -496,7 +496,7 @@ CONTAINS
                CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm, &
                                            stats=stats, &
                                            v_shift=0.0_dp, &
-                                           do_corr=.FALSE., ignore_bias=.FALSE., &
+                                           ignore_bias=.FALSE., &
                                            negf_env=negf_env, &
                                            negf_control=negf_control, &
                                            sub_env=sub_env, &
@@ -513,7 +513,7 @@ CONTAINS
                CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm, &
                                            stats=stats, &
                                            v_shift=0.0_dp, &
-                                           do_corr=.FALSE., ignore_bias=.FALSE., &
+                                           ignore_bias=.FALSE., &
                                            negf_env=negf_env, &
                                            negf_control=negf_control, &
                                            sub_env=sub_env, &
@@ -588,7 +588,6 @@ CONTAINS
       CALL timestop(handle)
    END SUBROUTINE guess_fermi_level
 
-#if 1
 ! **************************************************************************************************
 !> \brief Compute shift in Hartree patential
 !> \param negf_env      NEGF environment
@@ -731,7 +730,7 @@ CONTAINS
             ! closed contour: residuals
             CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
                                                v_shift=v_shift_guess, &
-                                               do_corr=.FALSE., ignore_bias=.TRUE., &
+                                               ignore_bias=.TRUE., &
                                                negf_env=negf_env, &
                                                negf_control=negf_control, &
                                                sub_env=sub_env, &
@@ -742,7 +741,7 @@ CONTAINS
             CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
                                         stats=stats, &
                                         v_shift=v_shift_guess, &
-                                        do_corr=.FALSE., ignore_bias=.TRUE., &
+                                        ignore_bias=.TRUE., &
                                         negf_env=negf_env, &
                                         negf_control=negf_control, &
                                         sub_env=sub_env, &
@@ -759,7 +758,7 @@ CONTAINS
             CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
                                         stats=stats, &
                                         v_shift=v_shift_guess, &
-                                        do_corr=.FALSE., ignore_bias=.TRUE., &
+                                        ignore_bias=.TRUE., &
                                         negf_env=negf_env, &
                                         negf_control=negf_control, &
                                         sub_env=sub_env, &
@@ -838,281 +837,6 @@ CONTAINS
 
       CALL timestop(handle)
    END SUBROUTINE shift_potential
-
-#else
-! **************************************************************************************************
-!> \brief Compute shift in Hartree patential
-!> \param negf_env      NEGF environment
-!> \param negf_control  NEGF control
-!> \param sub_env       NEGF parallel (sub)group environment
-!> \param qs_env        QuickStep environment
-!> \param base_contact  index of the reference contact
-!> \param log_unit      output unit
-! **************************************************************************************************
-   SUBROUTINE shift_potential(negf_env, negf_control, sub_env, qs_env, base_contact, log_unit)
-      TYPE(negf_env_type), INTENT(in)                    :: negf_env
-      TYPE(negf_control_type), POINTER                   :: negf_control
-      TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
-      TYPE(qs_environment_type), POINTER                 :: qs_env
-      INTEGER, INTENT(in)                                :: base_contact, log_unit
-
-      CHARACTER(LEN=*), PARAMETER :: routineN = 'shift_potential', &
-         routineP = moduleN//':'//routineN
-
-      COMPLEX(kind=dp)                                   :: lbound_cpath, ubound_cpath, ubound_lpath
-      INTEGER                                            :: handle, ispin, iter_count, nao, &
-                                                            ncontacts, nspins
-      LOGICAL                                            :: do_kpoints
-      REAL(kind=dp)                                      :: mu_base, nelectrons, nelectrons_corr, &
-                                                            nelectrons_ref, t1, t2, temperature, &
-                                                            trace
-      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: rho_ao_corr_fm, rho_ao_fm
-      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
-      TYPE(cp_fm_type), POINTER                          :: matrix_s_fm, work_fm
-      TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_qs_kp
-      TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(green_functions_cache_type)                   :: g_surf_cache
-      TYPE(integration_status_type)                      :: stats, stats_corr
-      TYPE(qs_rho_type), POINTER                         :: rho_struct
-      TYPE(qs_subsys_type), POINTER                      :: subsys
-
-      ncontacts = SIZE(negf_control%contacts)
-      ! nothing to do
-      IF (.NOT. (ALLOCATED(negf_env%h_s) .AND. ALLOCATED(negf_env%h_sc) .AND. &
-                 ASSOCIATED(negf_env%s_s) .AND. ALLOCATED(negf_env%s_sc))) RETURN
-      IF (ncontacts < 2) RETURN
-
-      CALL timeset(routineN, handle)
-
-      CALL get_qs_env(qs_env, blacs_env=blacs_env, do_kpoints=do_kpoints, dft_control=dft_control, &
-                      para_env=para_env, rho=rho_struct, subsys=subsys)
-      CPASSERT(.NOT. do_kpoints)
-
-      ! apply external NEGF potential
-      t1 = m_walltime()
-
-      ! need a globally distributed overlap matrix in order to compute integration errors
-      IF (sub_env%ngroups > 1) THEN
-         NULLIFY (matrix_s_fm, fm_struct)
-
-         CALL cp_fm_get_info(negf_env%s_s, nrow_global=nao)
-         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, context=blacs_env)
-
-         CALL cp_fm_create(matrix_s_fm, fm_struct)
-         CALL cp_fm_struct_release(fm_struct)
-
-         IF (sub_env%group_distribution(sub_env%mepos_global) == 0) THEN
-            work_fm => negf_env%s_s
-         ELSE
-            NULLIFY (work_fm)
-         END IF
-
-         CALL cp_fm_copy_general(work_fm, matrix_s_fm, para_env)
-      ELSE
-         matrix_s_fm => negf_env%s_s
-         CALL cp_fm_retain(matrix_s_fm)
-         CALL cp_fm_get_info(matrix_s_fm, matrix_struct=fm_struct)
-      END IF
-
-      CALL cp_fm_get_info(matrix_s_fm, matrix_struct=fm_struct)
-
-      nspins = SIZE(negf_env%h_s)
-
-      mu_base = negf_control%contacts(base_contact)%fermi_level
-
-      ! keep the initial charge density matrix and Kohn-Sham matrix
-      CALL qs_rho_get(rho_struct, rho_ao_kp=rho_ao_qs_kp)
-
-      ! extract the reference density matrix blocks
-      nelectrons_ref = 0.0_dp
-      ALLOCATE (rho_ao_fm(nspins), rho_ao_corr_fm(nspins))
-      DO ispin = 1, nspins
-         NULLIFY (rho_ao_fm(ispin)%matrix, rho_ao_corr_fm(ispin)%matrix)
-         CALL cp_fm_create(rho_ao_fm(ispin)%matrix, fm_struct)
-         CALL cp_fm_create(rho_ao_corr_fm(ispin)%matrix, fm_struct)
-
-         CALL negf_copy_sym_dbcsr_to_fm_submat(matrix=rho_ao_qs_kp(ispin, 1)%matrix, &
-                                               fm=rho_ao_fm(ispin)%matrix, &
-                                               atomlist_row=negf_control%atomlist_S_screening, &
-                                               atomlist_col=negf_control%atomlist_S_screening, &
-                                               subsys=subsys, mpi_comm_global=para_env%group, &
-                                               do_upper_diag=.TRUE., do_lower=.TRUE.)
-
-         CALL cp_fm_trace(rho_ao_fm(ispin)%matrix, matrix_s_fm, trace)
-         nelectrons_ref = nelectrons_ref+trace
-      END DO
-
-      IF (log_unit > 0) THEN
-         WRITE (log_unit, '(/,T2,A)') "COMPUTE SHIFT IN HARTREE POTENTIAL"
-         WRITE (log_unit, '(/,T2,A,T55,F25.14,/)') "Initial electronic density of the scattering region:", -1.0_dp*nelectrons_ref
-         WRITE (log_unit, '(T3,A)') "Step     Integration method      Time        V shift     Convergence (density)"
-         WRITE (log_unit, '(T3,78("-"))')
-      END IF
-
-      temperature = negf_control%contacts(base_contact)%temperature
-
-      ! integration limits: C-path (arch)
-      lbound_cpath = CMPLX(negf_control%energy_lbound, negf_control%eta, kind=dp)
-      ubound_cpath = CMPLX(mu_base-REAL(negf_control%gamma_kT, kind=dp)*temperature, &
-                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
-
-      ! integration limits: L-path (linear)
-      ubound_lpath = CMPLX(mu_base-LOG(negf_control%conv_density)*temperature, &
-                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
-
-      DO iter_count = 1, negf_control%v_shift_maxiters
-         ! compute an updated density matrix
-         CALL integration_status_reset(stats)
-
-         DO ispin = 1, nspins
-            ! closed contour: residuals
-            CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
-                                               v_shift=negf_control%v_shift, &
-                                               do_corr=.FALSE., ignore_bias=.TRUE., &
-                                               negf_env=negf_env, &
-                                               negf_control=negf_control, &
-                                               sub_env=sub_env, &
-                                               ispin=ispin, &
-                                               base_contact=base_contact)
-
-            ! closed contour: C-path
-            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
-                                        stats=stats, &
-                                        v_shift=negf_control%v_shift, &
-                                        do_corr=.FALSE., ignore_bias=.TRUE., &
-                                        negf_env=negf_env, &
-                                        negf_control=negf_control, &
-                                        sub_env=sub_env, &
-                                        ispin=ispin, &
-                                        base_contact=base_contact, &
-                                        integr_lbound=lbound_cpath, &
-                                        integr_ubound=ubound_cpath, &
-                                        matrix_s_global=matrix_s_fm, &
-                                        is_circular=.TRUE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
-
-            ! closed contour: L-path
-            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
-                                        stats=stats, &
-                                        v_shift=negf_control%v_shift, &
-                                        do_corr=.FALSE., ignore_bias=.TRUE., &
-                                        negf_env=negf_env, &
-                                        negf_control=negf_control, &
-                                        sub_env=sub_env, &
-                                        ispin=ispin, &
-                                        base_contact=base_contact, &
-                                        integr_lbound=ubound_cpath, &
-                                        integr_ubound=ubound_lpath, &
-                                        matrix_s_global=matrix_s_fm, &
-                                        is_circular=.FALSE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
-         END DO
-
-         IF (nspins > 1) THEN
-            DO ispin = 1, nspins
-               CALL cp_fm_scale_and_add(1.0_dp, rho_ao_fm(1)%matrix, 1.0_dp, rho_ao_fm(ispin)%matrix)
-            END DO
-         ELSE
-            CALL cp_fm_scale(2.0_dp, rho_ao_fm(1)%matrix)
-         END IF
-
-         CALL cp_fm_trace(rho_ao_fm(1)%matrix, matrix_s_fm, nelectrons)
-
-         ! compute the correction density matrix
-         CALL integration_status_reset(stats_corr)
-
-         DO ispin = 1, nspins
-            ! closed contour: residuals
-            CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_corr_fm(ispin)%matrix, &
-                                               v_shift=negf_control%v_shift, &
-                                               do_corr=.TRUE., ignore_bias=.TRUE., &
-                                               negf_env=negf_env, &
-                                               negf_control=negf_control, &
-                                               sub_env=sub_env, &
-                                               ispin=ispin, &
-                                               base_contact=base_contact)
-
-            ! closed contour: C-path
-            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
-                                        stats=stats_corr, &
-                                        v_shift=negf_control%v_shift, &
-                                        do_corr=.TRUE., ignore_bias=.TRUE., &
-                                        negf_env=negf_env, &
-                                        negf_control=negf_control, &
-                                        sub_env=sub_env, &
-                                        ispin=ispin, &
-                                        base_contact=base_contact, &
-                                        integr_lbound=lbound_cpath, &
-                                        integr_ubound=ubound_cpath, &
-                                        matrix_s_global=matrix_s_fm, &
-                                        is_circular=.TRUE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
-
-            ! closed contour: L-path
-            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_corr_fm(ispin)%matrix, &
-                                        stats=stats_corr, &
-                                        v_shift=negf_control%v_shift, &
-                                        do_corr=.TRUE., ignore_bias=.TRUE., &
-                                        negf_env=negf_env, &
-                                        negf_control=negf_control, &
-                                        sub_env=sub_env, &
-                                        ispin=ispin, &
-                                        base_contact=base_contact, &
-                                        integr_lbound=ubound_cpath, &
-                                        integr_ubound=ubound_lpath, &
-                                        matrix_s_global=matrix_s_fm, &
-                                        is_circular=.FALSE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
-         END DO
-
-         IF (nspins > 1) THEN
-            DO ispin = 1, nspins
-               CALL cp_fm_scale_and_add(1.0_dp, rho_ao_corr_fm(1)%matrix, 1.0_dp, rho_ao_corr_fm(ispin)%matrix)
-            END DO
-         ELSE
-            CALL cp_fm_scale(2.0_dp, rho_ao_corr_fm(1)%matrix)
-         END IF
-
-         CALL cp_fm_trace(rho_ao_corr_fm(1)%matrix, matrix_s_fm, nelectrons_corr)
-
-         t2 = m_walltime()
-
-         IF (log_unit > 0) THEN
-            WRITE (log_unit, '(T2,I5,T12,A,T32,F8.1,T42,F15.8,T60,ES20.5E2)') &
-               iter_count, get_method_description_string(stats, negf_control%integr_method), &
-               t2-t1, negf_control%v_shift, nelectrons-nelectrons_ref
-         END IF
-
-         IF (ABS(nelectrons-nelectrons_ref) < negf_control%conv_scf) EXIT
-
-         t1 = t2
-
-         ! compute correction
-         negf_control%v_shift = negf_control%v_shift-negf_control%v_shift_alpha*(nelectrons_ref-nelectrons)/nelectrons_corr
-      END DO
-
-      IF (log_unit > 0) THEN
-         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential", negf_control%v_shift
-      END IF
-
-      DO ispin = nspins, 1, -1
-         CALL cp_fm_release(rho_ao_corr_fm(ispin)%matrix)
-         CALL cp_fm_release(rho_ao_fm(ispin)%matrix)
-      END DO
-      DEALLOCATE (rho_ao_fm, rho_ao_corr_fm)
-
-      IF (ASSOCIATED(matrix_s_fm)) &
-         CALL cp_fm_release(matrix_s_fm)
-
-      CALL timestop(handle)
-   END SUBROUTINE shift_potential
-#endif
 
 ! **************************************************************************************************
 !> \brief Converge electronic density of the scattering region.
@@ -1297,7 +1021,7 @@ CONTAINS
                   ! closed contour: residuals
                   CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_new_fm(ispin)%matrix, &
                                                      v_shift=v_shift, &
-                                                     do_corr=.FALSE., ignore_bias=.FALSE., &
+                                                     ignore_bias=.FALSE., &
                                                      negf_env=negf_env, &
                                                      negf_control=negf_control, &
                                                      sub_env=sub_env, &
@@ -1308,7 +1032,7 @@ CONTAINS
                   CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin)%matrix, &
                                               stats=stats, &
                                               v_shift=v_shift, &
-                                              do_corr=.FALSE., ignore_bias=.FALSE., &
+                                              ignore_bias=.FALSE., &
                                               negf_env=negf_env, &
                                               negf_control=negf_control, &
                                               sub_env=sub_env, &
@@ -1326,7 +1050,7 @@ CONTAINS
                   CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_new_fm(ispin)%matrix, &
                                               stats=stats, &
                                               v_shift=v_shift, &
-                                              do_corr=.FALSE., ignore_bias=.FALSE., &
+                                              ignore_bias=.FALSE., &
                                               negf_env=negf_env, &
                                               negf_control=negf_control, &
                                               sub_env=sub_env, &
@@ -1566,7 +1290,6 @@ CONTAINS
 !> \param g_surf_contacts    set of surface Green's functions for every contact that computed
 !>                           within the given parallel group
 !> \param g_ret_s            globally distributed matrices to store retarded Green's functions
-!> \param gsg_ret_s          quantity G_ret_s * S_s * G_ret_s
 !> \param g_ret_scale        scale factor for retarded Green's functions
 !> \param gamma_contacts     2-D array of globally distributed matrices to store broadening matrices
 !>                           for every contact ([n_contacts, npoints])
@@ -1587,7 +1310,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE negf_retarded_green_function_batch(omega, v_shift, ignore_bias, negf_env, negf_control, sub_env, ispin, &
                                                  g_surf_contacts, &
-                                                 g_ret_s, gsg_ret_s, g_ret_scale, gamma_contacts, gret_gamma_gadv, dos, &
+                                                 g_ret_s, g_ret_scale, gamma_contacts, gret_gamma_gadv, dos, &
                                                  transm_coeff, transm_contact1, transm_contact2, just_contact)
       COMPLEX(kind=dp), DIMENSION(:), INTENT(in)         :: omega
       REAL(kind=dp), INTENT(in)                          :: v_shift
@@ -1598,7 +1321,7 @@ CONTAINS
       INTEGER, INTENT(in)                                :: ispin
       TYPE(cp_cfm_p_type), DIMENSION(:, :), INTENT(in)   :: g_surf_contacts
       TYPE(cp_cfm_p_type), DIMENSION(:), INTENT(in), &
-         OPTIONAL                                        :: g_ret_s, gsg_ret_s
+         OPTIONAL                                        :: g_ret_s
       COMPLEX(kind=dp), DIMENSION(:), INTENT(in), &
          OPTIONAL                                        :: g_ret_scale
       TYPE(cp_cfm_p_type), DIMENSION(:, :), INTENT(in), &
@@ -1619,7 +1342,7 @@ CONTAINS
          DIMENSION(:)                                    :: info1
       TYPE(copy_cfm_info_type), ALLOCATABLE, &
          DIMENSION(:, :)                                 :: info2
-      TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:)     :: g_ret_s_group, gsg_ret_s_group, &
+      TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:)     :: g_ret_s_group, &
                                                             self_energy_contacts, zwork1_contacts, &
                                                             zwork2_contacts
       TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:, :)  :: gamma_contacts_group, &
@@ -1682,7 +1405,7 @@ CONTAINS
          END DO
       END IF
 
-      IF (PRESENT(g_ret_s) .OR. PRESENT(gsg_ret_s) .OR. PRESENT(gret_gamma_gadv) .OR. &
+      IF (PRESENT(g_ret_s) .OR. PRESENT(gret_gamma_gadv) .OR. &
           PRESENT(dos) .OR. PRESENT(transm_coeff)) THEN
          ALLOCATE (g_ret_s_group(npoints))
 
@@ -1694,31 +1417,6 @@ CONTAINS
             DO ipoint = 1, npoints
                g_ret_s_group(ipoint)%matrix => g_ret_s(ipoint)%matrix
                CALL cp_cfm_retain(g_ret_s_group(ipoint)%matrix)
-            END DO
-         END IF
-      END IF
-
-      IF (PRESENT(gsg_ret_s)) THEN
-         CALL cp_cfm_create(matrix_s_cfm, matrix_struct=fm_struct)
-
-         IF (PRESENT(just_contact)) THEN
-            matrix_s => negf_env%contacts(just_contact)%s_00
-         ELSE
-            matrix_s => negf_env%s_s
-         END IF
-
-         CALL cp_fm_to_cfm(msourcer=matrix_s, mtarget=matrix_s_cfm)
-
-         ALLOCATE (gsg_ret_s_group(npoints))
-
-         IF (sub_env%ngroups > 1) THEN
-            DO ipoint = 1, npoints
-               NULLIFY (gsg_ret_s_group(ipoint)%matrix)
-            END DO
-         ELSE
-            DO ipoint = 1, npoints
-               gsg_ret_s_group(ipoint)%matrix => gsg_ret_s(ipoint)%matrix
-               CALL cp_cfm_retain(gsg_ret_s_group(ipoint)%matrix)
             END DO
          END IF
       END IF
@@ -1777,12 +1475,6 @@ CONTAINS
                ! already been initialised and they point to globally distributed matrices
                IF (ALLOCATED(g_ret_s_group)) THEN
                   CALL cp_cfm_create(g_ret_s_group(ipoint)%matrix, fm_struct)
-               END IF
-            END IF
-
-            IF (sub_env%ngroups > 1 .OR. .NOT. PRESENT(gsg_ret_s)) THEN
-               IF (ALLOCATED(gsg_ret_s_group)) THEN
-                  CALL cp_cfm_create(gsg_ret_s_group(ipoint)%matrix, fm_struct)
                END IF
             END IF
 
@@ -1869,24 +1561,6 @@ CONTAINS
                                                     v_hartree_s=negf_env%v_hartree_s)
                END IF
 
-               IF (ALLOCATED(gsg_ret_s_group)) THEN
-                  CPASSERT(ASSOCIATED(gsg_ret_s_group(ipoint)%matrix))
-
-                  ! we do not need contact self energies any longer, so we can use
-                  ! the array 'self_energy_contacts' as a set of work matrices
-                  CALL cp_cfm_gemm('N', 'N', nrows, nrows, nrows, &
-                                   z_one, g_ret_s_group(ipoint)%matrix, matrix_s_cfm, &
-                                   z_zero, self_energy_contacts(1)%matrix)
-                  CALL cp_cfm_gemm('N', 'N', nrows, nrows, nrows, &
-                                   z_one, self_energy_contacts(1)%matrix, &
-                                   g_ret_s_group(ipoint)%matrix, &
-                                   z_zero, gsg_ret_s_group(ipoint)%matrix)
-
-                  IF (PRESENT(g_ret_scale)) THEN
-                     IF (g_ret_scale(ipoint) /= z_one) CALL cp_cfm_scale(g_ret_scale(ipoint), gsg_ret_s_group(ipoint)%matrix)
-                  END IF
-               END IF
-
                IF (PRESENT(g_ret_scale)) THEN
                   IF (g_ret_scale(ipoint) /= z_one) CALL cp_cfm_scale(g_ret_scale(ipoint), g_ret_s_group(ipoint)%matrix)
                END IF
@@ -1938,40 +1612,6 @@ CONTAINS
                      CALL cp_cfm_finish_copy_general(g_ret_s(ipoint)%matrix, info1(ipoint))
                      IF (ASSOCIATED(g_ret_s_group(ipoint)%matrix)) &
                         CALL cp_cfm_cleanup_copy_general(g_ret_s_group(ipoint)%matrix, info1(ipoint))
-                  END IF
-               END DO
-
-               DEALLOCATE (info1)
-            END IF
-         END IF
-      END IF
-
-      IF (PRESENT(gsg_ret_s)) THEN
-         IF (sub_env%ngroups > 1) THEN
-            NULLIFY (para_env)
-            DO ipoint = 1, npoints
-               IF (ASSOCIATED(gsg_ret_s(ipoint)%matrix)) THEN
-                  CALL cp_cfm_get_info(gsg_ret_s(ipoint)%matrix, para_env=para_env)
-                  EXIT
-               END IF
-            END DO
-
-            IF (ASSOCIATED(para_env)) THEN
-               ALLOCATE (info1(npoints))
-
-               DO ipoint = 1, npoints
-                  IF (ASSOCIATED(gsg_ret_s(ipoint)%matrix)) THEN
-                     CALL cp_cfm_start_copy_general(gsg_ret_s_group(ipoint)%matrix, &
-                                                    gsg_ret_s(ipoint)%matrix, &
-                                                    para_env, info1(ipoint))
-                  END IF
-               END DO
-
-               DO ipoint = 1, npoints
-                  IF (ASSOCIATED(gsg_ret_s(ipoint)%matrix)) THEN
-                     CALL cp_cfm_finish_copy_general(gsg_ret_s(ipoint)%matrix, info1(ipoint))
-                     IF (ASSOCIATED(gsg_ret_s_group(ipoint)%matrix)) &
-                        CALL cp_cfm_cleanup_copy_general(gsg_ret_s_group(ipoint)%matrix, info1(ipoint))
                   END IF
                END DO
 
@@ -2128,13 +1768,6 @@ CONTAINS
          DEALLOCATE (g_ret_s_group)
       END IF
 
-      IF (ALLOCATED(gsg_ret_s_group)) THEN
-         DO ipoint = npoints, 1, -1
-            IF (ASSOCIATED(gsg_ret_s_group(ipoint)%matrix)) CALL cp_cfm_release(gsg_ret_s_group(ipoint)%matrix)
-         END DO
-         DEALLOCATE (gsg_ret_s_group)
-      END IF
-
       IF (ASSOCIATED(matrix_s_cfm)) CALL cp_cfm_release(matrix_s_cfm)
 
       IF (ALLOCATED(gamma_contacts_group)) THEN
@@ -2211,7 +1844,6 @@ CONTAINS
 !> \brief Compute contribution to the density matrix from the poles of the Fermi function.
 !> \param rho_ao_fm     density matrix (initialised on exit)
 !> \param v_shift       shift in Hartree potential
-!> \param do_corr       compute correction terms
 !> \param ignore_bias   ignore v_external from negf_control
 !> \param negf_env      NEGF environment
 !> \param negf_control  NEGF control
@@ -2221,11 +1853,11 @@ CONTAINS
 !> \param just_contact  ...
 !> \author Sergey Chulkov
 ! **************************************************************************************************
-   SUBROUTINE negf_init_rho_equiv_residuals(rho_ao_fm, v_shift, do_corr, ignore_bias, negf_env, &
+   SUBROUTINE negf_init_rho_equiv_residuals(rho_ao_fm, v_shift, ignore_bias, negf_env, &
                                             negf_control, sub_env, ispin, base_contact, just_contact)
       TYPE(cp_fm_type), POINTER                          :: rho_ao_fm
       REAL(kind=dp), INTENT(in)                          :: v_shift
-      LOGICAL, INTENT(in)                                :: do_corr, ignore_bias
+      LOGICAL, INTENT(in)                                :: ignore_bias
       TYPE(negf_env_type), INTENT(in)                    :: negf_env
       TYPE(negf_control_type), POINTER                   :: negf_control
       TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
@@ -2310,29 +1942,16 @@ CONTAINS
             END DO
          END IF
 
-         IF (do_corr) THEN
-            CALL negf_retarded_green_function_batch(omega=omega(:), &
-                                                    v_shift=v_shift, &
-                                                    ignore_bias=ignore_bias, &
-                                                    negf_env=negf_env, &
-                                                    negf_control=negf_control, &
-                                                    sub_env=sub_env, &
-                                                    ispin=ispin, &
-                                                    g_surf_contacts=g_surf_cache%g_surf_contacts, &
-                                                    gsg_ret_s=g_ret_s, &
-                                                    just_contact=just_contact)
-         ELSE
-            CALL negf_retarded_green_function_batch(omega=omega(:), &
-                                                    v_shift=v_shift, &
-                                                    ignore_bias=ignore_bias, &
-                                                    negf_env=negf_env, &
-                                                    negf_control=negf_control, &
-                                                    sub_env=sub_env, &
-                                                    ispin=ispin, &
-                                                    g_surf_contacts=g_surf_cache%g_surf_contacts, &
-                                                    g_ret_s=g_ret_s, &
-                                                    just_contact=just_contact)
-         END IF
+         CALL negf_retarded_green_function_batch(omega=omega(:), &
+                                                 v_shift=v_shift, &
+                                                 ignore_bias=ignore_bias, &
+                                                 negf_env=negf_env, &
+                                                 negf_control=negf_control, &
+                                                 sub_env=sub_env, &
+                                                 ispin=ispin, &
+                                                 g_surf_contacts=g_surf_cache%g_surf_contacts, &
+                                                 g_ret_s=g_ret_s, &
+                                                 just_contact=just_contact)
 
          CALL green_functions_cache_release(g_surf_cache)
 
@@ -2358,7 +1977,6 @@ CONTAINS
 !> \param rho_ao_fm       density matrix (initialised on exit)
 !> \param stats           integration statistics (updated on exit)
 !> \param v_shift         shift in Hartree potential
-!> \param do_corr         compute correction terms
 !> \param ignore_bias     ignore v_external from negf_control
 !> \param negf_env        NEGF environment
 !> \param negf_control    NEGF control
@@ -2373,13 +1991,13 @@ CONTAINS
 !> \param just_contact    ...
 !> \author Sergey Chulkov
 ! **************************************************************************************************
-   SUBROUTINE negf_add_rho_equiv_low(rho_ao_fm, stats, v_shift, do_corr, ignore_bias, negf_env, negf_control, sub_env, &
+   SUBROUTINE negf_add_rho_equiv_low(rho_ao_fm, stats, v_shift, ignore_bias, negf_env, negf_control, sub_env, &
                                      ispin, base_contact, integr_lbound, integr_ubound, matrix_s_global, &
                                      is_circular, g_surf_cache, just_contact)
       TYPE(cp_fm_type), POINTER                          :: rho_ao_fm
       TYPE(integration_status_type), INTENT(inout)       :: stats
       REAL(kind=dp), INTENT(in)                          :: v_shift
-      LOGICAL, INTENT(in)                                :: do_corr, ignore_bias
+      LOGICAL, INTENT(in)                                :: ignore_bias
       TYPE(negf_env_type), INTENT(in)                    :: negf_env
       TYPE(negf_control_type), POINTER                   :: negf_control
       TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
@@ -2513,31 +2131,17 @@ CONTAINS
                zscale(:) = z_one
             END IF
 
-            IF (do_corr) THEN
-               CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
-                                                       v_shift=v_shift, &
-                                                       ignore_bias=ignore_bias, &
-                                                       negf_env=negf_env, &
-                                                       negf_control=negf_control, &
-                                                       sub_env=sub_env, &
-                                                       ispin=ispin, &
-                                                       g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
-                                                       gsg_ret_s=zdata(1:npoints), &
-                                                       g_ret_scale=zscale(1:npoints), &
-                                                       just_contact=just_contact)
-            ELSE
-               CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
-                                                       v_shift=v_shift, &
-                                                       ignore_bias=ignore_bias, &
-                                                       negf_env=negf_env, &
-                                                       negf_control=negf_control, &
-                                                       sub_env=sub_env, &
-                                                       ispin=ispin, &
-                                                       g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
-                                                       g_ret_s=zdata(1:npoints), &
-                                                       g_ret_scale=zscale(1:npoints), &
-                                                       just_contact=just_contact)
-            END IF
+            CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
+                                                    v_shift=v_shift, &
+                                                    ignore_bias=ignore_bias, &
+                                                    negf_env=negf_env, &
+                                                    negf_control=negf_control, &
+                                                    sub_env=sub_env, &
+                                                    ispin=ispin, &
+                                                    g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
+                                                    g_ret_s=zdata(1:npoints), &
+                                                    g_ret_scale=zscale(1:npoints), &
+                                                    just_contact=just_contact)
 
             DEALLOCATE (xnodes, zscale)
             npoints_total = npoints_total+npoints
@@ -2655,31 +2259,17 @@ CONTAINS
                zscale(:) = z_one
             END IF
 
-            IF (do_corr) THEN
-               CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
-                                                       v_shift=v_shift, &
-                                                       ignore_bias=ignore_bias, &
-                                                       negf_env=negf_env, &
-                                                       negf_control=negf_control, &
-                                                       sub_env=sub_env, &
-                                                       ispin=ispin, &
-                                                       g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
-                                                       gsg_ret_s=zdata(1:npoints), &
-                                                       g_ret_scale=zscale(1:npoints), &
-                                                       just_contact=just_contact)
-            ELSE
-               CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
-                                                       v_shift=v_shift, &
-                                                       ignore_bias=ignore_bias, &
-                                                       negf_env=negf_env, &
-                                                       negf_control=negf_control, &
-                                                       sub_env=sub_env, &
-                                                       ispin=ispin, &
-                                                       g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
-                                                       g_ret_s=zdata(1:npoints), &
-                                                       g_ret_scale=zscale(1:npoints), &
-                                                       just_contact=just_contact)
-            END IF
+            CALL negf_retarded_green_function_batch(omega=xnodes(1:npoints), &
+                                                    v_shift=v_shift, &
+                                                    ignore_bias=ignore_bias, &
+                                                    negf_env=negf_env, &
+                                                    negf_control=negf_control, &
+                                                    sub_env=sub_env, &
+                                                    ispin=ispin, &
+                                                    g_surf_contacts=g_surf_cache%g_surf_contacts(:, npoints_total+1:), &
+                                                    g_ret_s=zdata(1:npoints), &
+                                                    g_ret_scale=zscale(1:npoints), &
+                                                    just_contact=just_contact)
 
             npoints_total = npoints_total+npoints
 
