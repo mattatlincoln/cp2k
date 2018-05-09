@@ -104,7 +104,8 @@ MODULE negf_control_types
       INTEGER                                            :: nprocs
       !> shift in hartree potential
       REAL(kind=dp)                                      :: v_shift
-      REAL(kind=dp)                                      :: v_shift_alpha
+      REAL(kind=dp)                                      :: v_shift_alpha ! TO DELETE
+      REAL(kind=dp)                                      :: v_shift_offset
       INTEGER                                            :: v_shift_maxiters
    END TYPE negf_control_type
 
@@ -280,6 +281,7 @@ CONTAINS
 
       CALL section_vals_val_get(negf_section, "V_SHIFT", r_val=negf_control%v_shift)
       CALL section_vals_val_get(negf_section, "V_SHIFT_ALPHA", r_val=negf_control%v_shift_alpha)
+      CALL section_vals_val_get(negf_section, "V_SHIFT_OFFSET", r_val=negf_control%v_shift_offset)
       CALL section_vals_val_get(negf_section, "V_SHIFT_MAX_ITERS", i_val=negf_control%v_shift_maxiters)
 
       ! check consistency

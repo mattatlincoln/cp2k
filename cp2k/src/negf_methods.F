@@ -588,6 +588,258 @@ CONTAINS
       CALL timestop(handle)
    END SUBROUTINE guess_fermi_level
 
+#if 1
+! **************************************************************************************************
+!> \brief Compute shift in Hartree patential
+!> \param negf_env      NEGF environment
+!> \param negf_control  NEGF control
+!> \param sub_env       NEGF parallel (sub)group environment
+!> \param qs_env        QuickStep environment
+!> \param base_contact  index of the reference contact
+!> \param log_unit      output unit
+! **************************************************************************************************
+   SUBROUTINE shift_potential(negf_env, negf_control, sub_env, qs_env, base_contact, log_unit)
+      TYPE(negf_env_type), INTENT(in)                    :: negf_env
+      TYPE(negf_control_type), POINTER                   :: negf_control
+      TYPE(negf_subgroup_env_type), INTENT(in)           :: sub_env
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      INTEGER, INTENT(in)                                :: base_contact, log_unit
+
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'shift_potential', &
+         routineP = moduleN//':'//routineN
+
+      COMPLEX(kind=dp)                                   :: lbound_cpath, ubound_cpath, ubound_lpath
+      INTEGER                                            :: handle, ispin, iter_count, nao, &
+                                                            ncontacts, nspins
+      LOGICAL                                            :: do_kpoints
+      REAL(kind=dp)                                      :: mu_base, nelectrons_guess, nelectrons_min, nelectrons_max, &
+                                                            nelectrons_ref, t1, t2, temperature, &
+                                                            trace, v_shift_guess, v_shift_min, v_shift_max
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: rho_ao_fm
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_fm_type), POINTER                          :: matrix_s_fm, work_fm
+      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_qs_kp
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(green_functions_cache_type)                   :: g_surf_cache
+      TYPE(integration_status_type)                      :: stats
+      TYPE(qs_rho_type), POINTER                         :: rho_struct
+      TYPE(qs_subsys_type), POINTER                      :: subsys
+
+      ncontacts = SIZE(negf_control%contacts)
+      ! nothing to do
+      IF (.NOT. (ALLOCATED(negf_env%h_s) .AND. ALLOCATED(negf_env%h_sc) .AND. &
+                 ASSOCIATED(negf_env%s_s) .AND. ALLOCATED(negf_env%s_sc))) RETURN
+      IF (ncontacts < 2) RETURN
+
+      CALL timeset(routineN, handle)
+
+      CALL get_qs_env(qs_env, blacs_env=blacs_env, do_kpoints=do_kpoints, dft_control=dft_control, &
+                      para_env=para_env, rho=rho_struct, subsys=subsys)
+      CPASSERT(.NOT. do_kpoints)
+
+      ! apply external NEGF potential
+      t1 = m_walltime()
+
+      ! need a globally distributed overlap matrix in order to compute integration errors
+      IF (sub_env%ngroups > 1) THEN
+         NULLIFY (matrix_s_fm, fm_struct)
+
+         CALL cp_fm_get_info(negf_env%s_s, nrow_global=nao)
+         CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nao, context=blacs_env)
+
+         CALL cp_fm_create(matrix_s_fm, fm_struct)
+         CALL cp_fm_struct_release(fm_struct)
+
+         IF (sub_env%group_distribution(sub_env%mepos_global) == 0) THEN
+            work_fm => negf_env%s_s
+         ELSE
+            NULLIFY (work_fm)
+         END IF
+
+         CALL cp_fm_copy_general(work_fm, matrix_s_fm, para_env)
+      ELSE
+         matrix_s_fm => negf_env%s_s
+         CALL cp_fm_retain(matrix_s_fm)
+         CALL cp_fm_get_info(matrix_s_fm, matrix_struct=fm_struct)
+      END IF
+
+      CALL cp_fm_get_info(matrix_s_fm, matrix_struct=fm_struct)
+
+      nspins = SIZE(negf_env%h_s)
+
+      mu_base = negf_control%contacts(base_contact)%fermi_level
+
+      ! keep the initial charge density matrix and Kohn-Sham matrix
+      CALL qs_rho_get(rho_struct, rho_ao_kp=rho_ao_qs_kp)
+
+      ! extract the reference density matrix blocks
+      nelectrons_ref = 0.0_dp
+      ALLOCATE (rho_ao_fm(nspins))
+      DO ispin = 1, nspins
+         NULLIFY (rho_ao_fm(ispin)%matrix)
+         CALL cp_fm_create(rho_ao_fm(ispin)%matrix, fm_struct)
+
+         CALL negf_copy_sym_dbcsr_to_fm_submat(matrix=rho_ao_qs_kp(ispin, 1)%matrix, &
+                                               fm=rho_ao_fm(ispin)%matrix, &
+                                               atomlist_row=negf_control%atomlist_S_screening, &
+                                               atomlist_col=negf_control%atomlist_S_screening, &
+                                               subsys=subsys, mpi_comm_global=para_env%group, &
+                                               do_upper_diag=.TRUE., do_lower=.TRUE.)
+
+         CALL cp_fm_trace(rho_ao_fm(ispin)%matrix, matrix_s_fm, trace)
+         nelectrons_ref = nelectrons_ref+trace
+      END DO
+
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, '(/,T2,A)') "COMPUTE SHIFT IN HARTREE POTENTIAL"
+         WRITE (log_unit, '(/,T2,A,T55,F25.14,/)') "Initial electronic density of the scattering region:", -1.0_dp*nelectrons_ref
+         WRITE (log_unit, '(T3,A)') "Step     Integration method      Time        V shift     Convergence (density)"
+         WRITE (log_unit, '(T3,78("-"))')
+      END IF
+
+      temperature = negf_control%contacts(base_contact)%temperature
+
+      ! integration limits: C-path (arch)
+      lbound_cpath = CMPLX(negf_control%energy_lbound, negf_control%eta, kind=dp)
+      ubound_cpath = CMPLX(mu_base-REAL(negf_control%gamma_kT, kind=dp)*temperature, &
+                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
+
+      ! integration limits: L-path (linear)
+      ubound_lpath = CMPLX(mu_base-LOG(negf_control%conv_density)*temperature, &
+                           REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
+
+      v_shift_min = negf_control%v_shift
+      v_shift_max = negf_control%v_shift + negf_control%v_shift_offset
+
+      DO iter_count = 1, negf_control%v_shift_maxiters
+         SELECT CASE (iter_count)
+         CASE (1)
+            v_shift_guess = v_shift_min
+         CASE (2)
+            v_shift_guess = v_shift_max
+         CASE DEFAULT
+            v_shift_guess = v_shift_min-(nelectrons_min-nelectrons_ref)* &
+                            (v_shift_max-v_shift_min)/(nelectrons_max-nelectrons_min)
+         END SELECT
+
+         ! compute an updated density matrix
+         CALL integration_status_reset(stats)
+
+         DO ispin = 1, nspins
+            ! closed contour: residuals
+            CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
+                                               v_shift=v_shift_guess, &
+                                               do_corr=.FALSE., ignore_bias=.TRUE., &
+                                               negf_env=negf_env, &
+                                               negf_control=negf_control, &
+                                               sub_env=sub_env, &
+                                               ispin=ispin, &
+                                               base_contact=base_contact)
+
+            ! closed contour: C-path
+            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
+                                        stats=stats, &
+                                        v_shift=v_shift_guess, &
+                                        do_corr=.FALSE., ignore_bias=.TRUE., &
+                                        negf_env=negf_env, &
+                                        negf_control=negf_control, &
+                                        sub_env=sub_env, &
+                                        ispin=ispin, &
+                                        base_contact=base_contact, &
+                                        integr_lbound=lbound_cpath, &
+                                        integr_ubound=ubound_cpath, &
+                                        matrix_s_global=matrix_s_fm, &
+                                        is_circular=.TRUE., &
+                                        g_surf_cache=g_surf_cache)
+            CALL green_functions_cache_release(g_surf_cache)
+
+            ! closed contour: L-path
+            CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
+                                        stats=stats, &
+                                        v_shift=v_shift_guess, &
+                                        do_corr=.FALSE., ignore_bias=.TRUE., &
+                                        negf_env=negf_env, &
+                                        negf_control=negf_control, &
+                                        sub_env=sub_env, &
+                                        ispin=ispin, &
+                                        base_contact=base_contact, &
+                                        integr_lbound=ubound_cpath, &
+                                        integr_ubound=ubound_lpath, &
+                                        matrix_s_global=matrix_s_fm, &
+                                        is_circular=.FALSE., &
+                                        g_surf_cache=g_surf_cache)
+            CALL green_functions_cache_release(g_surf_cache)
+         END DO
+
+         IF (nspins > 1) THEN
+            DO ispin = 1, nspins
+               CALL cp_fm_scale_and_add(1.0_dp, rho_ao_fm(1)%matrix, 1.0_dp, rho_ao_fm(ispin)%matrix)
+            END DO
+         ELSE
+            CALL cp_fm_scale(2.0_dp, rho_ao_fm(1)%matrix)
+         END IF
+
+         CALL cp_fm_trace(rho_ao_fm(1)%matrix, matrix_s_fm, nelectrons_guess)
+
+         t2 = m_walltime()
+
+         IF (log_unit > 0) THEN
+            WRITE (log_unit, '(T2,I5,T12,A,T32,F8.1,T42,F15.8,T60,ES20.5E2)') &
+               iter_count, get_method_description_string(stats, negf_control%integr_method), &
+               t2-t1, v_shift_guess, nelectrons_guess-nelectrons_ref
+         END IF
+
+         IF (ABS(nelectrons_guess-nelectrons_ref) < negf_control%conv_scf) EXIT
+
+         ! compute correction
+         SELECT CASE (iter_count)
+         CASE (1)
+            nelectrons_min = nelectrons_guess
+         CASE (2)
+            nelectrons_max = nelectrons_guess
+         CASE DEFAULT
+            IF (v_shift_guess < v_shift_min) THEN
+               v_shift_max = v_shift_min
+               nelectrons_max = nelectrons_min
+               v_shift_min = v_shift_guess
+               nelectrons_min = nelectrons_guess
+            ELSE IF (v_shift_guess > v_shift_max) THEN
+               v_shift_min = v_shift_max
+               nelectrons_min = nelectrons_max
+               v_shift_max = v_shift_guess
+               nelectrons_max = nelectrons_guess
+            ELSE IF (v_shift_max-v_shift_guess < v_shift_guess-v_shift_min) THEN
+               v_shift_max = v_shift_guess
+               nelectrons_max = nelectrons_guess
+            ELSE
+               v_shift_min = v_shift_guess
+               nelectrons_min = nelectrons_guess
+            END IF
+         END SELECT
+
+         t1 = t2
+      END DO
+
+      negf_control%v_shift = v_shift_guess
+
+      IF (log_unit > 0) THEN
+         WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential", negf_control%v_shift
+      END IF
+
+      DO ispin = nspins, 1, -1
+         CALL cp_fm_release(rho_ao_fm(ispin)%matrix)
+      END DO
+      DEALLOCATE (rho_ao_fm)
+
+      IF (ASSOCIATED(matrix_s_fm)) &
+         CALL cp_fm_release(matrix_s_fm)
+
+      CALL timestop(handle)
+   END SUBROUTINE shift_potential
+
+#else
 ! **************************************************************************************************
 !> \brief Compute shift in Hartree patential
 !> \param negf_env      NEGF environment
@@ -860,6 +1112,7 @@ CONTAINS
 
       CALL timestop(handle)
    END SUBROUTINE shift_potential
+#endif
 
 ! **************************************************************************************************
 !> \brief Converge electronic density of the scattering region.
