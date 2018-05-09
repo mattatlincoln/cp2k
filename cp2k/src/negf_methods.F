@@ -485,7 +485,7 @@ CONTAINS
             DO ispin = 1, nspins
                CALL negf_init_rho_equiv_residuals(rho_ao_fm=rho_ao_fm, &
                                                   v_shift=0.0_dp, &
-                                                  ignore_bias=.FALSE., &
+                                                  ignore_bias=.TRUE., &
                                                   negf_env=negf_env, &
                                                   negf_control=negf_control, &
                                                   sub_env=sub_env, &
@@ -496,7 +496,7 @@ CONTAINS
                CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm, &
                                            stats=stats, &
                                            v_shift=0.0_dp, &
-                                           ignore_bias=.FALSE., &
+                                           ignore_bias=.TRUE., &
                                            negf_env=negf_env, &
                                            negf_control=negf_control, &
                                            sub_env=sub_env, &
@@ -513,7 +513,7 @@ CONTAINS
                CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm, &
                                            stats=stats, &
                                            v_shift=0.0_dp, &
-                                           ignore_bias=.FALSE., &
+                                           ignore_bias=.TRUE., &
                                            negf_env=negf_env, &
                                            negf_control=negf_control, &
                                            sub_env=sub_env, &
