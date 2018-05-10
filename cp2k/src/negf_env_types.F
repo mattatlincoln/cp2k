@@ -126,7 +126,9 @@ MODULE negf_env_types
       !> Kohn-Sham matrix of the scattering region -- contact interface ([nspins, ncontacts])
       TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:, :)    :: h_sc
       !> overlap matrix of the scattering region
-      TYPE(cp_fm_type), POINTER                           :: s_s => null(), v_hartree_s => null()
+      TYPE(cp_fm_type), POINTER                           :: s_s => null()
+      !> an external Hartree potential in atomic basis set representation
+      TYPE(cp_fm_type), POINTER                           :: v_hartree_s => null()
       !> overlap matrix of the scattering region -- contact interface for every contact ([ncontacts])
       TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)       :: s_sc
       !> structure needed for density mixing

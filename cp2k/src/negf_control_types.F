@@ -72,6 +72,8 @@ MODULE negf_control_types
       !> atoms belonging to the scattering region as well as atoms belonging to
       !> screening regions of all the contacts
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atomlist_S_screening
+      !> do not keep contact self-energy matrices
+      LOGICAL                                            :: disable_cache
       !> convergence criteria for adaptive integration methods
       REAL(kind=dp)                                      :: conv_density
       !> convergence criteria for iterative Lopez-Sancho algorithm
@@ -86,7 +88,7 @@ MODULE negf_control_types
       REAL(kind=dp)                                      :: energy_lbound
       !> infinitesimal offset along the imaginary axis [in a.u.]
       REAL(kind=dp)                                      :: eta
-      !> initial guess in determine the actual Fermi level of bulk contacts [in a.u.]
+      !> initial guess to determine the actual Fermi level of bulk contacts [in a.u.]
       REAL(kind=dp)                                      :: homo_lumo_gap
       !> number of residuals (poles of the Fermi function)
       INTEGER                                            :: delta_npoles
@@ -102,9 +104,11 @@ MODULE negf_control_types
       INTEGER                                            :: max_scf
       !> minimal number of MPI processes to be used to compute Green's function per energy point
       INTEGER                                            :: nprocs
-      !> shift in hartree potential
+      !> shift in Hartree potential [in a.u.]
       REAL(kind=dp)                                      :: v_shift
+      !> initial offset to determine the correct shift in Hartree potential [in a.u.]
       REAL(kind=dp)                                      :: v_shift_offset
+      !> maximal number of iteration to determine the shift in Hartree potential
       INTEGER                                            :: v_shift_maxiters
    END TYPE negf_control_type
 
@@ -254,6 +258,8 @@ CONTAINS
       END DO
 
       is_explicit = read_negf_atomlist(negf_control%atomlist_S, negf_section, 1, "SCATTERING_REGION", subsys)
+
+      CALL section_vals_val_get(negf_section, "DISABLE_CACHE", l_val=negf_control%disable_cache)
 
       CALL section_vals_val_get(negf_section, "EPS_DENSITY", r_val=negf_control%conv_density)
       CALL section_vals_val_get(negf_section, "EPS_GREEN", r_val=negf_control%conv_green)

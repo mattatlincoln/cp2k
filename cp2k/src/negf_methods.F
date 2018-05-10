@@ -125,7 +125,6 @@ MODULE negf_methods
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'negf_methods'
    LOGICAL, PARAMETER, PRIVATE          :: debug_this_module = .TRUE.
-   LOGICAL, PARAMETER, PRIVATE          :: disable_cache = .TRUE.
 
    PUBLIC :: do_negf
 
@@ -620,7 +619,8 @@ CONTAINS
       TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_qs_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
-      TYPE(green_functions_cache_type)                   :: g_surf_cache
+      TYPE(green_functions_cache_type), ALLOCATABLE, &
+         DIMENSION(:)                                    :: g_surf_circular, g_surf_linear
       TYPE(integration_status_type)                      :: stats
       TYPE(qs_rho_type), POINTER                         :: rho_struct
       TYPE(qs_subsys_type), POINTER                      :: subsys
@@ -711,6 +711,8 @@ CONTAINS
       v_shift_min = negf_control%v_shift
       v_shift_max = negf_control%v_shift + negf_control%v_shift_offset
 
+      ALLOCATE (g_surf_circular(nspins), g_surf_linear(nspins))
+
       DO iter_count = 1, negf_control%v_shift_maxiters
          SELECT CASE (iter_count)
          CASE (1)
@@ -750,8 +752,9 @@ CONTAINS
                                         integr_ubound=ubound_cpath, &
                                         matrix_s_global=matrix_s_fm, &
                                         is_circular=.TRUE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
+                                        g_surf_cache=g_surf_circular(ispin))
+            IF (negf_control%disable_cache) &
+               CALL green_functions_cache_release(g_surf_circular(ispin))
 
             ! closed contour: L-path
             CALL negf_add_rho_equiv_low(rho_ao_fm=rho_ao_fm(ispin)%matrix, &
@@ -767,8 +770,9 @@ CONTAINS
                                         integr_ubound=ubound_lpath, &
                                         matrix_s_global=matrix_s_fm, &
                                         is_circular=.FALSE., &
-                                        g_surf_cache=g_surf_cache)
-            CALL green_functions_cache_release(g_surf_cache)
+                                        g_surf_cache=g_surf_linear(ispin))
+            IF (negf_control%disable_cache) &
+               CALL green_functions_cache_release(g_surf_linear(ispin))
          END DO
 
          IF (nspins > 1) THEN
@@ -825,6 +829,12 @@ CONTAINS
       IF (log_unit > 0) THEN
          WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential", negf_control%v_shift
       END IF
+
+     DO ispin = nspins, 1, -1
+        CALL green_functions_cache_release(g_surf_circular(ispin))
+        CALL green_functions_cache_release(g_surf_linear(ispin))
+     END DO
+     DEALLOCATE (g_surf_circular, g_surf_linear)
 
       DO ispin = nspins, 1, -1
          CALL cp_fm_release(rho_ao_fm(ispin)%matrix)
@@ -1040,7 +1050,7 @@ CONTAINS
                                               matrix_s_global=matrix_s_fm, &
                                               is_circular=.TRUE., &
                                               g_surf_cache=g_surf_circular(ispin))
-                  IF (disable_cache) &
+                  IF (negf_control%disable_cache) &
                      CALL green_functions_cache_release(g_surf_circular(ispin))
 
                   ! closed contour: L-path
@@ -1058,7 +1068,7 @@ CONTAINS
                                               matrix_s_global=matrix_s_fm, &
                                               is_circular=.FALSE., &
                                               g_surf_cache=g_surf_linear(ispin))
-                  IF (disable_cache) &
+                  IF (negf_control%disable_cache) &
                      CALL green_functions_cache_release(g_surf_linear(ispin))
 
                   ! non-equilibrium part
@@ -1074,7 +1084,7 @@ CONTAINS
                                                 base_contact=base_contact, &
                                                 matrix_s_global=matrix_s_fm, &
                                                 g_surf_cache=g_surf_nonequiv(ispin))
-                     IF (disable_cache) &
+                     IF (negf_control%disable_cache) &
                         CALL green_functions_cache_release(g_surf_nonequiv(ispin))
                   END IF
                END DO

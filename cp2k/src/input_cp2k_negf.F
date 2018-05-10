@@ -77,6 +77,12 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL keyword_create(keyword, name="DISABLE_CACHE", &
+                          description="Do not keep contact self-energy matrices for future reuse", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       ! convergence thresholds
       CALL keyword_create(keyword, name="EPS_DENSITY", &
                           description="Target accuracy for electronic density.", &
@@ -119,7 +125,7 @@ CONTAINS
 
       CALL keyword_create(keyword, name="HOMO_LUMO_GAP", &
                           description="The gap between the HOMO and some fictitions LUMO. This option is used as"// &
-                          " an initial offset in determine the actual Fermi level of bulk contacts."// &
+                          " an initial offset to determine the actual Fermi level of bulk contacts."// &
                           " It does not need to be exact HOMO-LUMO gap, just some value to start with.", &
                           n_var=1, type_of_var=real_t, unit_str="hartree", &
                           default_r_val=0.2_dp)
@@ -189,7 +195,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="V_SHIFT_OFFSET", &
-                          description="Initial offset in determine the optimal shift in Hartree potential.", &
+                          description="Initial offset to determine the optimal shift in Hartree potential.", &
                           n_var=1, type_of_var=real_t, default_r_val=0.10_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)

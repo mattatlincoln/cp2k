@@ -25,13 +25,16 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief compute direction vector of the given contact
-!> \param origin              origin
-!> \param direction_vector    direction vector
-!> \param origin_bias ...
-!> \param direction_vector_bias ...
-!> \param atomlist_screening  atoms belonging to the contact's screening region
-!> \param atomlist_bulk       atoms belonging to the contact's bulk region
-!> \param subsys              QuickStep subsystem
+!> \param origin                origin
+!> \param direction_vector      direction vector
+!> \param origin_bias           origin which will be used to apply the external bias
+!>                              (in contrast with 'origin' it does not include screening region)
+!> \param direction_vector_bias direction vector which will be used to apply the external bias
+!>                              (together with 'origin_bias' it defines a contact region where
+!>                              the external potential is kept constant)
+!> \param atomlist_screening    atoms belonging to the contact's screening region
+!> \param atomlist_bulk         atoms belonging to the contact's bulk region
+!> \param subsys                QuickStep subsystem
 !> \author Sergey Chulkov
 ! **************************************************************************************************
    SUBROUTINE contact_direction_vector(origin, direction_vector, origin_bias, direction_vector_bias, &
