@@ -20,7 +20,7 @@ MODULE negf_methods
         copy_cfm_info_type, cp_cfm_cleanup_copy_general, cp_cfm_create, &
         cp_cfm_finish_copy_general, cp_cfm_get_info, cp_cfm_get_submatrix, cp_cfm_p_type, &
         cp_cfm_release, cp_cfm_retain, cp_cfm_set_submatrix, cp_cfm_start_copy_general, &
-        cp_cfm_to_fm, cp_cfm_type, cp_fm_to_cfm
+        cp_cfm_to_fm, cp_cfm_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_fm_basic_linalg,              ONLY: cp_fm_scale,&
                                               cp_fm_scale_and_add,&
@@ -609,9 +609,8 @@ CONTAINS
       INTEGER                                            :: handle, ispin, iter_count, nao, &
                                                             ncontacts, nspins
       LOGICAL                                            :: do_kpoints
-      REAL(kind=dp)                                      :: mu_base, nelectrons_guess, nelectrons_min, nelectrons_max, &
-                                                            nelectrons_ref, t1, t2, temperature, &
-                                                            trace, v_shift_guess, v_shift_min, v_shift_max
+      REAL(kind=dp) :: mu_base, nelectrons_guess, nelectrons_max, nelectrons_min, nelectrons_ref, &
+         t1, t2, temperature, trace, v_shift_guess, v_shift_max, v_shift_min
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: rho_ao_fm
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
@@ -709,7 +708,7 @@ CONTAINS
                            REAL(negf_control%delta_npoles, kind=dp)*twopi*temperature, kind=dp)
 
       v_shift_min = negf_control%v_shift
-      v_shift_max = negf_control%v_shift + negf_control%v_shift_offset
+      v_shift_max = negf_control%v_shift+negf_control%v_shift_offset
 
       ALLOCATE (g_surf_circular(nspins), g_surf_linear(nspins))
 
@@ -830,11 +829,11 @@ CONTAINS
          WRITE (log_unit, '(T2,A,T62,F18.8)') "NEGF|    Shift in Hartree potential", negf_control%v_shift
       END IF
 
-     DO ispin = nspins, 1, -1
-        CALL green_functions_cache_release(g_surf_circular(ispin))
-        CALL green_functions_cache_release(g_surf_linear(ispin))
-     END DO
-     DEALLOCATE (g_surf_circular, g_surf_linear)
+      DO ispin = nspins, 1, -1
+         CALL green_functions_cache_release(g_surf_circular(ispin))
+         CALL green_functions_cache_release(g_surf_linear(ispin))
+      END DO
+      DEALLOCATE (g_surf_circular, g_surf_linear)
 
       DO ispin = nspins, 1, -1
          CALL cp_fm_release(rho_ao_fm(ispin)%matrix)
@@ -1348,9 +1347,8 @@ CONTAINS
          DIMENSION(:)                                    :: info1
       TYPE(copy_cfm_info_type), ALLOCATABLE, &
          DIMENSION(:, :)                                 :: info2
-      TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:)     :: g_ret_s_group, &
-                                                            self_energy_contacts, zwork1_contacts, &
-                                                            zwork2_contacts
+      TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:)     :: g_ret_s_group, self_energy_contacts, &
+                                                            zwork1_contacts, zwork2_contacts
       TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:, :)  :: gamma_contacts_group, &
                                                             gret_gamma_gadv_group
       TYPE(cp_cfm_type), POINTER                         :: matrix_s_cfm
