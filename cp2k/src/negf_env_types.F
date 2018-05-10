@@ -47,8 +47,6 @@ MODULE negf_env_types
                                               negf_copy_sym_dbcsr_to_fm_submat,&
                                               negf_reference_contact_matrix,&
                                               number_of_atomic_orbitals
-   USE negf_qs_env_types,               ONLY: negf_qs_env_neighbour_mepos,&
-                                              negf_qs_env_type
    USE negf_subgroup_types,             ONLY: negf_subgroup_env_type
    USE negf_vectors,                    ONLY: contact_direction_vector,&
                                               projection_on_direction_vector
@@ -180,9 +178,6 @@ CONTAINS
       TYPE(force_env_p_type), DIMENSION(:), POINTER      :: sub_force_env
       TYPE(negf_atom_map_contact_type), ALLOCATABLE, &
          DIMENSION(:)                                    :: map_contact
-      TYPE(negf_qs_env_type), POINTER                    :: negf_qs_env
-      TYPE(pw_env_type), POINTER                         :: pw_env
-      TYPE(pw_pool_type), POINTER                        :: pw_pool
       TYPE(pw_type), POINTER                             :: v_hartree_rspace
       TYPE(qs_environment_type), POINTER                 :: qs_env, qs_env_contact
       TYPE(qs_subsys_type), POINTER                      :: subsys, subsys_contact
@@ -233,9 +228,7 @@ CONTAINS
       CALL qs_energies_init(qs_env, calc_forces=.FALSE.)
       CALL get_qs_env(qs_env, blacs_env=blacs_env, do_kpoints=do_kpoints, &
                       matrix_s_kp=matrix_s_kp, matrix_ks_kp=matrix_ks_kp, &
-                      negf_env=negf_qs_env, pw_env=pw_env, subsys=subsys, &
-                      v_hartree_rspace=v_hartree_rspace)
-      CALL pw_env_get(pw_env, auxbas_pw_pool=pw_pool)
+                      subsys=subsys, v_hartree_rspace=v_hartree_rspace)
 
       IF (do_kpoints) THEN
          CPABORT("k-points are currently not supported for device FORCE_EVAL")
@@ -266,9 +259,6 @@ CONTAINS
          END IF
       END DO
 
-      ! obtain a Konh-Sham and overlap matrices for each contact
-      ALLOCATE (negf_qs_env%contacts(ncontacts))
-
       ! stage 2: obtain relevant Kohn-Sham matrix blocks for each contact
       DO icontact = 1, ncontacts
          IF (log_unit > 0) &
@@ -280,26 +270,11 @@ CONTAINS
 
          CALL negf_env_contact_init_matrices(contact_env=negf_env%contacts(icontact), sub_env=sub_env, &
                                              qs_env_contact=qs_env_contact, matrix_s_device=matrix_s_kp(1, 1)%matrix)
-         !
-         !  CALL negf_get_bulk_contact_matrix(negf_control_aux%contacts(icontact)%ks_block_map, &
-         !                                    negf_control_aux%contacts(icontact)%ks_block_storage,&
-         !                                    matrix_ks_kp, negf_control%contacts(icontact)%atomlist_bulk, &
-         !                                    map_contact(icontact)%atom_map, &
-         !                                    matrix_ks_kp_contact, cell_to_index, blacs_env%para_env)
-
-         negf_qs_env%contacts(icontact)%direction_vector = negf_env%contacts(icontact)%direction_vector
-         negf_qs_env%contacts(icontact)%origin_scattering = negf_env%contacts(icontact)%origin
-         negf_qs_env%contacts(icontact)%v_external = negf_control%contacts(icontact)%v_external
       END DO
-      !negf_control_aux%update_ks_matrix = .TRUE.
 
       ! obtain an initial KS-matrix for the scattering region
       CALL qs_energies(qs_env, consistent_energies=.FALSE., calc_forces=.FALSE.)
       CALL negf_env_device_init_matrices(negf_env, negf_control, sub_env, qs_env)
-
-      ! reference Hartree potential (!!! no longer needed !!!)
-      !CALL pw_pool_create_pw(pw_pool, negf_qs_env%v_hartree_ref, use_data=REALDATA3D, in_space=REALSPACE)
-      !CALL pw_copy(v_hartree_rspace, negf_qs_env%v_hartree_ref)
 
       ! electron density mixing;
       ! the input section below should be consistent with the subroutine create_negf_section()
@@ -309,9 +284,6 @@ CONTAINS
       CALL get_qs_env(qs_env, dft_control=dft_control)
       CALL mixing_storage_create(negf_env%mixing_storage, negf_mixing_section, &
                                  negf_env%mixing_method, dft_control%qs_control%cutoff)
-
-      CALL negf_qs_env_neighbour_mepos(negf_qs_env, pw_pool)
-      negf_qs_env%conv_jacobi = negf_control%conv_density
 
       CALL timestop(handle)
    END SUBROUTINE negf_env_create
@@ -696,9 +668,9 @@ CONTAINS
 
 ! **************************************************************************************************
 !> \brief Modify the Hartree potential by applying an external potential.
-!> \param v_hartree     Hartree potential to update
-!> \param contact_env   ...
-!> \param contact_control ...
+!> \param v_hartree        Hartree potential to update (modified on exit)
+!> \param contact_env      NEGF environment for every contact
+!> \param contact_control  NEGF control for every contact
 !> \author Sergey Chulkov
 ! **************************************************************************************************
    SUBROUTINE negf_env_init_v_hartree(v_hartree, contact_env, contact_control)

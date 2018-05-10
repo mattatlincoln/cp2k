@@ -188,12 +188,6 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create(keyword, name="V_SHIFT_ALPHA", &
-                          description="Mixing factor to determine the optimal shift in Hartree potential.", &
-                          n_var=1, type_of_var=real_t, default_r_val=0.20_dp)
-      CALL section_add_keyword(section, keyword)
-      CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, name="V_SHIFT_OFFSET", &
                           description="Initial offset in determine the optimal shift in Hartree potential.", &
                           n_var=1, type_of_var=real_t, default_r_val=0.10_dp)

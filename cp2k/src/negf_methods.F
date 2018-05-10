@@ -97,7 +97,6 @@ MODULE negf_methods
    USE negf_matrix_utils,               ONLY: invert_cell_to_index,&
                                               negf_copy_fm_submat_to_dbcsr,&
                                               negf_copy_sym_dbcsr_to_fm_submat
-   USE negf_qs_env_types,               ONLY: negf_qs_env_type
    USE negf_subgroup_types,             ONLY: negf_sub_env_create,&
                                               negf_sub_env_release,&
                                               negf_subgroup_env_type
@@ -883,7 +882,6 @@ CONTAINS
          DIMENSION(:)                                    :: g_surf_circular, g_surf_linear, &
                                                             g_surf_nonequiv
       TYPE(integration_status_type)                      :: stats
-      TYPE(negf_qs_env_type), POINTER                    :: negf_qs_env
       TYPE(qs_rho_type), POINTER                         :: rho_struct
       TYPE(qs_subsys_type), POINTER                      :: subsys
 
@@ -895,13 +893,12 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      CALL get_qs_env(qs_env, blacs_env=blacs_env, do_kpoints=do_kpoints, dft_control=dft_control, negf_env=negf_qs_env, &
+      CALL get_qs_env(qs_env, blacs_env=blacs_env, do_kpoints=do_kpoints, dft_control=dft_control, &
                       matrix_ks_kp=matrix_ks_qs_kp, para_env=para_env, rho=rho_struct, subsys=subsys)
       CPASSERT(.NOT. do_kpoints)
 
       ! apply external NEGF potential
       t1 = m_walltime()
-      negf_qs_env%apply_bias = .TRUE.
 
       ! need a globally distributed overlap matrix in order to compute integration errors
       IF (sub_env%ngroups > 1) THEN
@@ -1217,7 +1214,6 @@ CONTAINS
       IF (ASSOCIATED(matrix_s_fm)) &
          CALL cp_fm_release(matrix_s_fm)
 
-      negf_qs_env%apply_bias = .FALSE.
       CALL timestop(handle)
    END SUBROUTINE converge_density
 
