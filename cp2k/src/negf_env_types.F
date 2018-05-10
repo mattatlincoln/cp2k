@@ -669,8 +669,8 @@ CONTAINS
    END SUBROUTINE negf_env_device_init_matrices
 
 ! **************************************************************************************************
-!> \brief Modify the Hartree potential by applying an external potential.
-!> \param v_hartree        Hartree potential to update (modified on exit)
+!> \brief Contribution to the Hartree potential related to the external bias voltage.
+!> \param v_hartree        Hartree potential (modified on exit)
 !> \param contact_env      NEGF environment for every contact
 !> \param contact_control  NEGF control for every contact
 !> \author Sergey Chulkov

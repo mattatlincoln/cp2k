@@ -102,12 +102,12 @@ CONTAINS
          IF (proj > proj_max) proj_max = proj
       END DO
 
-      ! adjust the origin, so it lies on a plane between the given contact and the scaterring region
+      ! adjust the origin, so it lies on a plane between the given contact and the scattering region
       origin_bias = origin+proj_min_bias*direction_vector
       origin = origin+proj_min*direction_vector
 
       ! rescale the vector, so the last atom of the given contact and the point 'origin + direction_vector' lie on
-      ! the same plane parallel to the 'origin' plane -- which separates the contact from the scaterring region.
+      ! the same plane parallel to the 'origin' plane -- which separates the contact from the scattering region.
       direction_vector_bias = (proj_max-proj_min_bias)*direction_vector
       direction_vector = (proj_max-proj_min)*direction_vector
 

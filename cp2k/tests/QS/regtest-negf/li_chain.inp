@@ -116,7 +116,7 @@
     # the NEGF procedure. The following parameters control evaluation of
     # the correct shift in Hartree potential:
     #   * V_SHIFT           -- initial guess for the shift
-    #   * V_SHIFT_MAX_ITERS -- maximum number of iterations
+    #   * V_SHIFT_MAX_ITERS -- maximal number of iterations
     #V_SHIFT            ${v_shift}
     V_SHIFT_MAX_ITERS   20
 

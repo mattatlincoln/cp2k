@@ -587,7 +587,7 @@ CONTAINS
    END SUBROUTINE guess_fermi_level
 
 ! **************************************************************************************************
-!> \brief Compute shift in Hartree patential
+!> \brief Compute shift in Hartree potential
 !> \param negf_env      NEGF environment
 !> \param negf_control  NEGF control
 !> \param sub_env       NEGF parallel (sub)group environment
@@ -2911,7 +2911,7 @@ CONTAINS
       END IF
 
       ! print transmission coefficients in terms of G0 = 2 * e^2 / h = 1 / pi ;
-      ! transmission coefficents returned by negf_retarded_green_function_batch() are already multiplied by 2 / pi
+      ! transmission coefficients returned by negf_retarded_green_function_batch() are already multiplied by 2 / pi
       rscale = 0.5_dp*rscale
 
       npoints_bundle = 4*sub_env%ngroups

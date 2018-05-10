@@ -124,7 +124,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, name="HOMO_LUMO_GAP", &
-                          description="The gap between the HOMO and some fictitions LUMO. This option is used as"// &
+                          description="The gap between the HOMO and some fictitious LUMO. This option is used as"// &
                           " an initial offset to determine the actual Fermi level of bulk contacts."// &
                           " It does not need to be exact HOMO-LUMO gap, just some value to start with.", &
                           n_var=1, type_of_var=real_t, unit_str="hartree", &
