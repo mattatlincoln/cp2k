@@ -234,10 +234,6 @@ MODULE qs_tddfpt2_methods
       !> sparse matrix with shape [nao x nao] distributed across subgroups;
       !> Aop_evects_sub(spin,:) = A_ia_munu_sub(spin) * mos_occ(spin)
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: A_ia_munu_sub
-      !> another sparse matrix with shape [nao x nao] distributed across subgroups (SEEMS WE DO NOT NEED IT ANYMORE)
-!      TYPE(dbcsr_p_type)                                 :: wdbcsr_ao_ao_sub
-      !> sparse matrix with shape [nao_aux x nao_aux] distributed across subgroups (SEEMS WE DO NOT NEED IT ANYMORE)
-!      TYPE(dbcsr_p_type)                                 :: wdbcsr_ao_ao_aux_fit_sub
       !
       ! *** structures to store electron densities distributed across parallel (sub)groups ***
       !
@@ -271,15 +267,10 @@ MODULE qs_tddfpt2_methods
    TYPE tddfpt_kernel_env_type
       ! ground state electron density
       TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set
-!      TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set_admm_primary
-!      TYPE(xc_rho_set_type), POINTER                     :: xc_rho_set_admm_aux
       ! response density
       TYPE(xc_rho_set_type), POINTER                     :: xc_rho1_set
-      TYPE(xc_rho_set_type), POINTER                     :: xc_rho1_set_admm_aux
       !> first and second derivatives of exchange-correlation functional
       TYPE(xc_derivative_set_type), POINTER              :: xc_deriv_set
-!      TYPE(xc_derivative_set_type), POINTER              :: xc_deriv_set_admm_aux
-!      TYPE(xc_derivative_set_type), POINTER              :: xc_deriv_set_admm_primary
       !> XC input section
       TYPE(section_vals_type), POINTER                   :: xc_section
       !> flags which indicate required components of the exchange-correlation functional
@@ -345,12 +336,9 @@ CONTAINS
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(tddfpt_ground_state_mos), ALLOCATABLE, &
          DIMENSION(:)                                    :: gs_mos
-      TYPE(tddfpt_kernel_env_type)                       :: kernel_env, kernel_env_admm_aux, &
-                                                            kernel_env_admm_primary
+      TYPE(tddfpt_kernel_env_type)                       :: kernel_env, kernel_env_admm_aux
       TYPE(tddfpt_subgroup_env_type)                     :: sub_env
       TYPE(tddfpt_work_matrices)                         :: work_matrices
-
-!matrix_s_aux_fit, &
 
       CALL timeset(routineN, handle)
       logger => cp_get_default_logger()
@@ -502,15 +490,11 @@ CONTAINS
                                                      is_rks_triplets=tddfpt_control%rks_triplets, &
                                                      qs_env=qs_env, sub_env=sub_env, &
                                                      wfm_rho_orb=work_matrices%rho_ao_orb_fm_sub)
-      CALL tddfpt_create_kernel_env(kernel_env=kernel_env, &
-                                    rho_struct_sub=work_matrices%rho_orb_struct_sub, &
-                                    xc_section=xc_section, admm=.FALSE., &
-                                    is_rks_triplets=tddfpt_control%rks_triplets, sub_env=sub_env)
 
       IF (do_admm) THEN
-         CALL tddfpt_create_kernel_env(kernel_env=kernel_env_admm_primary, &
+         CALL tddfpt_create_kernel_env(kernel_env=kernel_env, &
                                        rho_struct_sub=work_matrices%rho_orb_struct_sub, &
-                                       xc_section=admm_env%xc_section_primary, admm=.TRUE., &
+                                       xc_section=admm_env%xc_section_primary, &
                                        is_rks_triplets=tddfpt_control%rks_triplets, sub_env=sub_env)
 
          CALL tddfpt_construct_aux_fit_density(rho_orb_struct=work_matrices%rho_orb_struct_sub, &
@@ -522,7 +506,12 @@ CONTAINS
 
          CALL tddfpt_create_kernel_env(kernel_env=kernel_env_admm_aux, &
                                        rho_struct_sub=work_matrices%rho_aux_fit_struct_sub, &
-                                       xc_section=admm_env%xc_section_aux, admm=.TRUE., &
+                                       xc_section=admm_env%xc_section_aux, &
+                                       is_rks_triplets=tddfpt_control%rks_triplets, sub_env=sub_env)
+      ELSE
+         CALL tddfpt_create_kernel_env(kernel_env=kernel_env, &
+                                       rho_struct_sub=work_matrices%rho_orb_struct_sub, &
+                                       xc_section=xc_section, &
                                        is_rks_triplets=tddfpt_control%rks_triplets, sub_env=sub_env)
       END IF
 
@@ -573,8 +562,7 @@ CONTAINS
             ! *** perform Davidson iterations ***
             conv = tddfpt_davidson_solver(evects=evects, evals=evals, S_evects=S_evects, gs_mos=gs_mos, &
                                           do_hfx=do_hfx, tddfpt_control=tddfpt_control, qs_env=qs_env, &
-                                          kernel_env=kernel_env, kernel_env_admm_primary=kernel_env_admm_primary, &
-                                          kernel_env_admm_aux=kernel_env_admm_aux, &
+                                          kernel_env=kernel_env, kernel_env_admm_aux=kernel_env_admm_aux, &
                                           sub_env=sub_env, logger=logger, &
                                           iter_unit=log_unit, energy_unit=energy_unit, &
                                           tddfpt_print_section=tddfpt_print_section, work_matrices=work_matrices)
@@ -638,7 +626,6 @@ CONTAINS
 
       IF (do_admm) THEN
          CALL tddfpt_release_kernel_env(kernel_env_admm_aux)
-         CALL tddfpt_release_kernel_env(kernel_env_admm_primary)
       END IF
       CALL tddfpt_release_kernel_env(kernel_env)
       CALL tddfpt_release_work_matrices(work_matrices, sub_env)
@@ -809,11 +796,6 @@ CONTAINS
                                           dbcsr_dist=sub_env%dbcsr_dist, sab=sub_env%sab_orb)
       END DO
 
-!      NULLIFY (work_matrices%wdbcsr_ao_ao_sub%matrix)
-!      CALL dbcsr_init_p(work_matrices%wdbcsr_ao_ao_sub%matrix)
-!      CALL tddfpt_dbcsr_create_by_dist(work_matrices%wdbcsr_ao_ao_sub%matrix, template=matrix_s(1)%matrix, &
-!                                       dbcsr_dist=sub_env%dbcsr_dist, sab=sub_env%sab_orb)
-
       ! group-specific response density
       NULLIFY (rho_ia_ao)
       CALL dbcsr_allocate_matrix_set(rho_ia_ao, nspins)
@@ -829,13 +811,8 @@ CONTAINS
       CALL qs_rho_rebuild(work_matrices%rho_orb_struct_sub, qs_env, rebuild_ao=.FALSE., &
                           rebuild_grids=.TRUE., pw_env_external=sub_env%pw_env)
 
-!      NULLIFY (work_matrices%wdbcsr_ao_ao_aux_fit_sub%matrix)
       NULLIFY (work_matrices%rho_aux_fit_struct_sub)
       IF (do_admm) THEN
-!         CALL dbcsr_init_p(work_matrices%wdbcsr_ao_ao_aux_fit_sub%matrix)
-!         CALL tddfpt_dbcsr_create_by_dist(work_matrices%wdbcsr_ao_ao_aux_fit_sub%matrix, template=matrix_s_aux_fit(1)%matrix, &
-!                                          dbcsr_dist=sub_env%dbcsr_dist, sab=sub_env%sab_aux_fit)
-
          NULLIFY (rho_ia_ao)
          CALL dbcsr_allocate_matrix_set(rho_ia_ao, nspins)
          DO ispin = 1, nspins
@@ -949,10 +926,6 @@ CONTAINS
          CALL qs_rho_release(work_matrices%rho_aux_fit_struct_sub)
       CALL qs_rho_release(work_matrices%rho_orb_struct_sub)
 
-!      IF (ASSOCIATED(work_matrices%wdbcsr_ao_ao_aux_fit_sub%matrix)) &
-!         CALL dbcsr_deallocate_matrix(work_matrices%wdbcsr_ao_ao_aux_fit_sub%matrix)
-!      CALL dbcsr_deallocate_matrix(work_matrices%wdbcsr_ao_ao_sub%matrix)
-
       DO ispin = SIZE(work_matrices%A_ia_munu_sub), 1, -1
          CALL dbcsr_deallocate_matrix(work_matrices%A_ia_munu_sub(ispin)%matrix)
       END DO
@@ -997,8 +970,6 @@ CONTAINS
 !> \param kernel_env       kernel environment (allocated and initialised on exit)
 !> \param rho_struct_sub   ground state charge density
 !> \param xc_section       input section which defines an exchange-correlation functional
-!> \param admm             create a kernel environment for an exchange-correlation functional used
-!>                         in ADMM correction terms
 !> \param is_rks_triplets  indicates that the triplet excited states calculation using
 !>                         spin-unpolarised molecular orbitals has been requested
 !> \param sub_env          parallel group environment
@@ -1006,11 +977,11 @@ CONTAINS
 !>    * 02.2017 created [Sergey Chulkov]
 !>    * 06.2018 the charge density needs to be provided via a dummy argument [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_create_kernel_env(kernel_env, rho_struct_sub, xc_section, admm, is_rks_triplets, sub_env)
+   SUBROUTINE tddfpt_create_kernel_env(kernel_env, rho_struct_sub, xc_section, is_rks_triplets, sub_env)
       TYPE(tddfpt_kernel_env_type), INTENT(out)          :: kernel_env
       TYPE(qs_rho_type), POINTER                         :: rho_struct_sub
       TYPE(section_vals_type), POINTER                   :: xc_section
-      LOGICAL, INTENT(in)                                :: admm, is_rks_triplets
+      LOGICAL, INTENT(in)                                :: is_rks_triplets
       TYPE(tddfpt_subgroup_env_type), INTENT(in)         :: sub_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_create_kernel_env', &
@@ -1080,7 +1051,7 @@ CONTAINS
       kernel_env%beta = 0.0_dp
 
       ! kernel_env%beta is taken into account in spin-restricted case only
-      IF (nspins == 1 .AND. .NOT. admm) THEN
+      IF (nspins == 1) THEN
          IF (is_rks_triplets) THEN
             ! K_{triplets} = K_{alpha,alpha} - K_{alpha,beta}
             kernel_env%beta = -1.0_dp
@@ -2205,26 +2176,23 @@ CONTAINS
 !> \param matrix_ks             Kohn-Sham matrix
 !> \param qs_env                Quickstep environment
 !> \param kernel_env            kernel environment
-!> \param kernel_env_admm_primary kernel environment for ADMM primary exchange functional
-!> \param kernel_env_admm_aux     kernel environment for ADMM primary auxiliary functional
+!> \param kernel_env_admm_aux   kernel environment for ADMM correction
 !> \param sub_env               parallel (sub)group environment
 !> \param work_matrices         collection of work matrices (modified on exit)
 !> \par History
 !>    * 06.2016 created [Sergey Chulkov]
 !>    * 03.2017 refactored [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, evects, S_evects, gs_mos, &
-                                        is_rks_triplets, do_hfx, matrix_ks, &
-                                        qs_env, kernel_env, kernel_env_admm_primary, &
-                                        kernel_env_admm_aux, sub_env, work_matrices)
+   SUBROUTINE tddfpt_compute_Aop_evects(Aop_evects, evects, S_evects, gs_mos, is_rks_triplets, &
+                                        do_hfx, matrix_ks, qs_env, kernel_env, kernel_env_admm_aux, &
+                                        sub_env, work_matrices)
       TYPE(cp_fm_p_type), DIMENSION(:, :), INTENT(in)    :: Aop_evects, evects, S_evects
       TYPE(tddfpt_ground_state_mos), DIMENSION(:), &
          INTENT(in)                                      :: gs_mos
       LOGICAL, INTENT(in)                                :: is_rks_triplets, do_hfx
       TYPE(dbcsr_p_type), DIMENSION(:), INTENT(in)       :: matrix_ks
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(tddfpt_kernel_env_type), INTENT(in)           :: kernel_env, kernel_env_admm_primary, &
-                                                            kernel_env_admm_aux
+      TYPE(tddfpt_kernel_env_type), INTENT(in)           :: kernel_env, kernel_env_admm_aux
       TYPE(tddfpt_subgroup_env_type), INTENT(in)         :: sub_env
       TYPE(tddfpt_work_matrices), INTENT(inout)          :: work_matrices
 
@@ -2320,13 +2288,15 @@ CONTAINS
                CALL pw_zero(work_matrices%A_ia_rspace_sub(ispin)%pw)
             END DO
 
+            ! C_x d^{2}E_{x}^{DFT}[\rho] / d\rho^2
+            ! + C_{HF} d^{2}E_{x, ADMM}^{DFT}[\rho] / d\rho^2 in case of ADMM calculation
             CALL tddfpt_apply_xc(A_ia_rspace=work_matrices%A_ia_rspace_sub, kernel_env=kernel_env, &
                                  rho_ia_struct=work_matrices%rho_orb_struct_sub, &
                                  is_rks_triplets=is_rks_triplets, pw_env=sub_env%pw_env, &
                                  work_v_xc=work_matrices%wpw_rspace_sub)
 
             ! ADMM correction
-            IF (do_hfx .AND. do_admm) THEN
+            IF (do_admm) THEN
                CALL tddfpt_construct_aux_fit_density(rho_orb_struct=work_matrices%rho_orb_struct_sub, &
                                                      rho_aux_fit_struct=work_matrices%rho_aux_fit_struct_sub, &
                                                      qs_env=qs_env, sub_env=sub_env, &
@@ -2334,13 +2304,7 @@ CONTAINS
                                                      wfm_rho_aux_fit=work_matrices%rho_ao_aux_fit_fm_sub, &
                                                      wfm_aux_orb=work_matrices%wfm_aux_orb_sub)
 
-               ! E_{x}^{DFT}[\rho]
-               CALL tddfpt_apply_xc(A_ia_rspace=work_matrices%A_ia_rspace_sub, &
-                                    kernel_env=kernel_env_admm_primary, &
-                                    rho_ia_struct=work_matrices%rho_orb_struct_sub, &
-                                    is_rks_triplets=is_rks_triplets, pw_env=sub_env%pw_env, &
-                                    work_v_xc=work_matrices%wpw_rspace_sub)
-               ! E_{x}^{DFT}[\hat{\rho}]
+               ! - C_{HF} d^{2}E_{x, ADMM}^{DFT}[\hat{\rho}] / d\hat{\rho}^2
                CALL tddfpt_apply_xc(A_ia_rspace=work_matrices%A_ia_rspace_sub, &
                                     kernel_env=kernel_env_admm_aux, &
                                     rho_ia_struct=work_matrices%rho_aux_fit_struct_sub, &
@@ -2401,7 +2365,6 @@ CONTAINS
                                        matrix_ks=matrix_ks, work_fm_ao_mo_occ=work_matrices%wfm_ao_mo_occ)
 
          IF (do_hfx) THEN
-            do_admm = ASSOCIATED(sub_env%admm_A)
             CALL tddfpt_apply_hfx(Aop_evects=Aop_evects, evects=evects, gs_mos=gs_mos, do_admm=do_admm, &
                                   qs_env=qs_env, work_rho_ia_ao=work_matrices%hfx_rho_ao, &
                                   work_hmat=work_matrices%hfx_hmat, wfm_rho_orb=work_matrices%hfx_fm_ao_ao)
@@ -2594,8 +2557,7 @@ CONTAINS
 !> \param tddfpt_control        TDDFPT control parameters
 !> \param qs_env                Quickstep environment
 !> \param kernel_env            kernel environment
-!> \param kernel_env_admm_primary ...
-!> \param kernel_env_admm_aux ...
+!> \param kernel_env_admm_aux   kernel environment for ADMM correction
 !> \param sub_env               parallel (sub)group environment
 !> \param logger                CP2K logger
 !> \param iter_unit             I/O unit to write basic iteration information
@@ -2610,7 +2572,7 @@ CONTAINS
 !>       Thomas Chassaing in 2002.
 ! **************************************************************************************************
    FUNCTION tddfpt_davidson_solver(evects, evals, S_evects, gs_mos, do_hfx, tddfpt_control, &
-                                   qs_env, kernel_env, kernel_env_admm_primary, kernel_env_admm_aux, &
+                                   qs_env, kernel_env, kernel_env_admm_aux, &
                                    sub_env, logger, iter_unit, energy_unit, &
                                    tddfpt_print_section, work_matrices) RESULT(conv)
       TYPE(cp_fm_p_type), DIMENSION(:, :), INTENT(inout) :: evects
@@ -2621,8 +2583,7 @@ CONTAINS
       LOGICAL, INTENT(in)                                :: do_hfx
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(tddfpt_kernel_env_type), INTENT(in)           :: kernel_env, kernel_env_admm_primary, &
-                                                            kernel_env_admm_aux
+      TYPE(tddfpt_kernel_env_type), INTENT(in)           :: kernel_env, kernel_env_admm_aux
       TYPE(tddfpt_subgroup_env_type), INTENT(in)         :: sub_env
       TYPE(cp_logger_type), POINTER                      :: logger
       INTEGER, INTENT(in)                                :: iter_unit, energy_unit
@@ -2706,7 +2667,6 @@ CONTAINS
                                         gs_mos=gs_mos, is_rks_triplets=tddfpt_control%rks_triplets, &
                                         do_hfx=do_hfx, matrix_ks=matrix_ks, &
                                         qs_env=qs_env, kernel_env=kernel_env, &
-                                        kernel_env_admm_primary=kernel_env_admm_primary, &
                                         kernel_env_admm_aux=kernel_env_admm_aux, &
                                         sub_env=sub_env, &
                                         work_matrices=work_matrices)
