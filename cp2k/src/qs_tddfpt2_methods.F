@@ -3016,8 +3016,8 @@ CONTAINS
          CALL integer_to_string(mult, mult_str)
          WRITE (log_unit, '(/,1X,A1,A,1X,A,/)') lsd_str, "-TDDFPT states of multiplicity", TRIM(mult_str)
 
-         WRITE (log_unit, '(T11,A,T21,A,T37,A,T69,A)') "State", "Excitation", "Transition dipole (a.u.)", "Oscillator"
-         WRITE (log_unit, '(T11,A,T21,A,T39,A,T49,A,T59,A,T67,A)') "number", "energy (eV)", "x", "y", "z", "strength (a.u.)"
+         WRITE (log_unit, '(T10,A,T19,A,T37,A,T69,A)') "State", "Excitation", "Transition dipole (a.u.)", "Oscillator"
+         WRITE (log_unit, '(T10,A,T19,A,T37,A,T49,A,T61,A,T67,A)') "number", "energy (eV)", "x", "y", "z", "strength (a.u.)"
          WRITE (log_unit, '(T10,72("-"))')
       END IF
 
@@ -3077,7 +3077,7 @@ CONTAINS
                trans_dipoles(:) = SQRT(2.0_dp)*trans_dipoles(:)
             osc_strength = 2.0_dp/3.0_dp*evals(istate)*accurate_dot_product(trans_dipoles, trans_dipoles)
 
-            WRITE (log_unit, '(1X,A,T9,I8,T21,F11.5,T34,3(1X,F9.4),T69,F10.5)') &
+            WRITE (log_unit, '(1X,A,T9,I7,T19,F11.5,T31,3(1X,ES11.4E2),T69,ES12.5E2)') &
                "TDDFPT|", istate, evals(istate)*evolt, trans_dipoles(1:nderivs), osc_strength
          END IF
       END DO
