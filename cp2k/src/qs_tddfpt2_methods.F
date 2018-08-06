@@ -2848,10 +2848,9 @@ CONTAINS
       REAL(kind=dp), DIMENSION(nderivs)                  :: trans_dipoles
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_cfm_p_type), ALLOCATABLE, DIMENSION(:)     :: gamma_00, gamma_inv_00
-      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: ediff_inv, ediff_inv_weights, &
-                                                            gamma_imag, gamma_real, S_mos_virt, &
-                                                            scaled_evect, weights_fm
-      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:, :)   :: dS_mos_occ, opvec
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:)      :: ediff_inv, gamma_imag, gamma_real, &
+                                                            S_mos_virt, weights_fm
+      TYPE(cp_fm_p_type), ALLOCATABLE, DIMENSION(:, :)   :: dS_mos_occ, opvec, trans_dipole_matrix
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
       TYPE(cp_para_env_type), POINTER                    :: para_env
 
@@ -2966,15 +2965,18 @@ CONTAINS
       END IF
 
       IF (dipole_form == tddfpt_dipole_velocity) THEN
-         ALLOCATE (ediff_inv(nspins), ediff_inv_weights(nspins), scaled_evect(nspins))
+         ALLOCATE (ediff_inv(nspins))
+         ALLOCATE (trans_dipole_matrix(nderivs, nspins))
          DO ispin = 1, nspins
-            NULLIFY (ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix, scaled_evect(ispin)%matrix)
+            NULLIFY (ediff_inv(ispin)%matrix)
             CALL cp_fm_get_info(weights_fm(ispin)%matrix, matrix_struct=fm_struct)
 
-            CALL cp_fm_create(ediff_inv(ispin)%matrix, fm_struct)
-            CALL cp_fm_create(ediff_inv_weights(ispin)%matrix, fm_struct)
+            DO ideriv = 1, nderivs
+               NULLIFY (trans_dipole_matrix(ideriv, ispin)%matrix)
+               CALL cp_fm_create(trans_dipole_matrix(ideriv, ispin)%matrix, fm_struct)
+            END DO
 
-            CALL fm_pool_create_fm(fm_pool_ao_mo_occ(ispin)%pool, scaled_evect(ispin)%matrix)
+            CALL cp_fm_create(ediff_inv(ispin)%matrix, fm_struct)
          END DO
 
          ! compute (E_virt_a - E_occ_i)^{-1}
@@ -2997,13 +2999,31 @@ CONTAINS
             END DO
 !$OMP END PARALLEL DO
          END DO
+
+         DO ispin = 1, nspins
+            DO ideriv = 1, nderivs
+               CALL cp_dbcsr_sm_fm_multiply(dipole_op_xyz(ideriv)%matrix, gs_mos(ispin)%mos_virt, S_mos_virt(ispin)%matrix, &
+                                            ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
+               ! weights_fm = mos_virt^T * dS * mos_occ
+               CALL cp_gemm('T', 'N', nmo_virt(ispin), nmo_occ(ispin), nao, 1.0_dp, S_mos_virt(ispin)%matrix, &
+                            gs_mos(ispin)%mos_occ, 0.0_dp, weights_fm(ispin)%matrix)
+               ! trans_dipole_matrix = mos_virt^T * dS * mos_occ ./ (e_virt - e_occ)
+               CALL cp_fm_schur_product(weights_fm(ispin)%matrix, ediff_inv(ispin)%matrix, &
+                                        trans_dipole_matrix(ideriv, ispin)%matrix)
+            END DO
+         END DO
+
+         DO ispin = nspins, 1, -1
+            CALL cp_fm_release(ediff_inv(ispin)%matrix)
+         END DO
+         DEALLOCATE (ediff_inv)
       END IF
 
       DO ispin = 1, nspins
          CALL cp_dbcsr_sm_fm_multiply(matrix_s, gs_mos(ispin)%mos_virt, S_mos_virt(ispin)%matrix, &
                                       ncol=nmo_virt(ispin), alpha=1.0_dp, beta=0.0_dp)
 
-         IF (dipole_form == tddfpt_dipole_length .OR. dipole_form == tddfpt_dipole_velocity) THEN
+         IF (dipole_form == tddfpt_dipole_length) THEN ! .OR. dipole_form == tddfpt_dipole_velocity) THEN
             DO ideriv = 1, nderivs
                CALL cp_dbcsr_sm_fm_multiply(dipole_op_xyz(ideriv)%matrix, gs_mos(ispin)%mos_occ, &
                                             dS_mos_occ(ideriv, ispin)%matrix, ncol=nmo_occ(ispin), alpha=1.0_dp, beta=0.0_dp)
@@ -3031,12 +3051,6 @@ CONTAINS
                             evects(ispin, istate)%matrix, 0.0_dp, weights_fm(ispin)%matrix)
 
                ! compute electric dipole moments
-               IF (dipole_form == tddfpt_dipole_velocity) THEN
-                  CALL cp_fm_schur_product(weights_fm(ispin)%matrix, ediff_inv(ispin)%matrix, ediff_inv_weights(ispin)%matrix)
-                  CALL cp_gemm('N', 'N', nao, nmo_occ(ispin), nmo_virt(ispin), 1.0_dp, gs_mos(ispin)%mos_virt, &
-                               ediff_inv_weights(ispin)%matrix, 0.0_dp, scaled_evect(ispin)%matrix)
-               END IF
-
                DO ideriv = 1, nderivs
                   SELECT CASE (dipole_form)
                   CASE (tddfpt_dipole_berry)
@@ -3061,7 +3075,8 @@ CONTAINS
                      trans_dipoles(ideriv) = trans_dipoles(ideriv)+trans_dipole
 
                   CASE (tddfpt_dipole_velocity)
-                     CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, trans_dipole)
+!                    CALL cp_fm_trace(dS_mos_occ(ideriv, ispin)%matrix, scaled_evect(ispin)%matrix, trans_dipole)
+                     CALL cp_fm_trace(trans_dipole_matrix(ideriv, ispin)%matrix, weights_fm(ispin)%matrix, trans_dipole)
                      trans_dipoles(ideriv) = trans_dipoles(ideriv)+trans_dipole
 
                   CASE DEFAULT
@@ -3073,7 +3088,7 @@ CONTAINS
 
          ! *** summary information ***
          IF (log_unit > 0) THEN
-            IF (nspins == 1 .AND. dipole_form /= tddfpt_dipole_velocity) &
+            IF (nspins == 1) & ! .AND. dipole_form /= tddfpt_dipole_velocity) &
                trans_dipoles(:) = SQRT(2.0_dp)*trans_dipoles(:)
             osc_strength = 2.0_dp/3.0_dp*evals(istate)*accurate_dot_product(trans_dipoles, trans_dipoles)
 
@@ -3084,11 +3099,16 @@ CONTAINS
 
       IF (dipole_form == tddfpt_dipole_velocity) THEN
          DO ispin = nspins, 1, -1
-            CALL fm_pool_give_back_fm(fm_pool_ao_mo_occ(ispin)%pool, scaled_evect(ispin)%matrix)
-            CALL cp_fm_release(ediff_inv_weights(ispin)%matrix)
-            CALL cp_fm_release(ediff_inv(ispin)%matrix)
+!            CALL fm_pool_give_back_fm(fm_pool_ao_mo_occ(ispin)%pool, scaled_evect(ispin)%matrix)
+!            CALL cp_fm_release(ediff_inv_weights(ispin)%matrix)
+!            CALL cp_fm_release(ediff_inv(ispin)%matrix)
+!
+            DO ideriv = nderivs, 1, -1
+               CALL cp_fm_release(trans_dipole_matrix(ideriv, ispin)%matrix)
+            END DO
          END DO
-         DEALLOCATE (ediff_inv, ediff_inv_weights, scaled_evect)
+!         DEALLOCATE (ediff_inv, ediff_inv_weights, scaled_evect, trans_dipole_matrix)
+         DEALLOCATE (trans_dipole_matrix)
       END IF
 
       DO ispin = nspins, 1, -1
